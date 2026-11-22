@@ -1,0 +1,42 @@
+# Subdirectory documentation & runbooks
+docs/RUNBOOK_*.md
+plugin/README.md
+wrapper/README.md
+legacy-daemon/README.md
+
+# Tests, smoke scripts, test specs, and binary test fixtures
+*_test.go
+*.test.*
+*.spec.*
+*smoke*.*
+*e2e*.*
+*probe*.*
+testdata/
+
+# Build & binary artifacts
+*.exe
+*.dll
+*.zip
+*.bak
+*.old
+wrapper/build/
+
+# Temporary probes, backups, logs, PIDs, and local session captures
+temp/
+*.log
+*.pid
+daemon.out.log
+daemon.err.log
+daemon.log
+daemon.pid
+e2e-screen-ready.txt
+
+# Local runtime config overrides (keep config.example.json & defaults)
+enhancer-config.json
+.env
+.env.*
+
+# Dependencies & OS/editor noise
+node_modules/
+.DS_Store
+Thumbs.db

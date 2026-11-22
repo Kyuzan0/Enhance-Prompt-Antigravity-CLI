@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+if [ "${SKIP_AUTO_RELEASE:-0}" = "1" ]; then
+  exit 0
+fi
+
+if command -v node >/dev/null 2>&1; then
+  exec node scripts/auto-bump-on-commit.mjs "$1"
+elif [ -x "/opt/antigravity-ide/antigravity-ide" ]; then
+  exec env ELECTRON_RUN_AS_NODE=1 /opt/antigravity-ide/antigravity-ide scripts/auto-bump-on-commit.mjs "$1"
+fi
+
+echo "[auto-release] node runtime not found; skipping auto version/changelog bump." >&2
+exit 0

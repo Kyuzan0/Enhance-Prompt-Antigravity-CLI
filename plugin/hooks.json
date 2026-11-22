@@ -1,0 +1,11 @@
+{
+  "prompt-enhancer": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "node hook.mjs",
+        "timeout": 15
+      }
+    ]
+  }
+}

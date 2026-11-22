@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "autoEnhance": false,
+  "triggerPrefixes": ["! ", "!enhance ", "!enhance:", "/enhance ", "/enhance:"],
+  "mode": "hybrid",
+  "model": "",
+  "timeoutMs": 3500,
+  "apiUrl": ""
+}

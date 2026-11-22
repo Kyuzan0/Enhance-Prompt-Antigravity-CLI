@@ -1,0 +1,38 @@
+{
+  "version": "2026-11-22",
+  "canonicalModels": [
+    { "wire": "gemini-4-argon-low", "display": "Gemini 4 Argon (Low)", "effort": "low" },
+    { "wire": "gemini-4-argon-medium", "display": "Gemini 4 Argon (Medium)", "effort": "medium" },
+    { "wire": "gemini-4-argon-high", "display": "Gemini 4 Argon (High)", "effort": "high" },
+    { "wire": "gemini-4-hydrogen-low", "display": "Gemini 4 Hydrogen (Low)", "effort": "low" },
+    { "wire": "gemini-4-hydrogen-medium", "display": "Gemini 4 Hydrogen (Medium)", "effort": "medium" },
+    { "wire": "gemini-4-hydrogen-high", "display": "Gemini 4 Hydrogen (High)", "effort": "high" },
+    { "wire": "gemini-4-hydrogen-xhigh", "display": "Gemini 4 Hydrogen (XHigh)", "effort": "xhigh" },
+    { "wire": "gemini-pro-orchestrator-g1-pro", "display": "Orchestrator (Argon)", "effort": "high" },
+    { "wire": "gemini-3.8-flash-high", "display": "Gemini 3.8 Flash (High)", "effort": "high" },
+    { "wire": "gemini-3.8-flash-medium", "display": "Gemini 3.8 Flash (Medium)", "effort": "medium" },
+    { "wire": "gemini-3.8-flash-low", "display": "Gemini 3.8 Flash (Low)", "effort": "low" },
+    { "wire": "claude-opus-5-5-low", "display": "Claude Opus 5.5 (Low)", "effort": "low" },
+    { "wire": "claude-opus-5-5-medium", "display": "Claude Opus 5.5 (Medium)", "effort": "medium" },
+    { "wire": "claude-opus-5-5-high", "display": "Claude Opus 5.5 (High)", "effort": "high" },
+    { "wire": "claude-sonnet-5-5-low", "display": "Claude Sonnet 5.5 (Low)", "effort": "low" },
+    { "wire": "claude-sonnet-5-5-medium", "display": "Claude Sonnet 5.5 (Medium)", "effort": "medium" },
+    { "wire": "claude-sonnet-5-5-high", "display": "Claude Sonnet 5.5 (High)", "effort": "high" },
+    { "wire": "claude-sonnet-4-6", "display": "Claude Sonnet 4.6 (Thinking)", "effort": "high" },
+    { "wire": "claude-opus-4-6-thinking", "display": "Claude Opus 4.6 (Thinking)", "effort": "high" },
+    { "wire": "gpt-oss-120b-medium", "display": "GPT-OSS 120B (Medium)", "effort": "medium" }
+  ],
+  "resolutionCases": [
+    { "input": "Gemini 4 Hydrogen (Medium)", "expectedWire": "gemini-4-hydrogen-medium" },
+    { "input": "Gemini 4 Hydrogen (Medium) Medium", "expectedWire": "gemini-4-hydrogen-medium" },
+    { "input": "Gemini 4 Argon (High) New", "expectedWire": "gemini-4-argon-high" },
+    { "input": "Gemini 3.8 Flash (Low)", "expectedWire": "gemini-3.8-flash-low" },
+    { "input": "Claude Opus 5.5 (High)", "expectedWire": "claude-opus-5-5-high" },
+    { "input": "Claude Sonnet 5.5 (Medium)", "expectedWire": "claude-sonnet-5-5-medium" },
+    { "input": "Claude Sonnet 4.6 (Thinking)", "expectedWire": "claude-sonnet-4-6" },
+    { "input": "Claude Opus 4.6 (Thinking)", "expectedWire": "claude-opus-4-6-thinking" },
+    { "input": "Orchestrator (Argon)", "expectedWire": "gemini-pro-orchestrator-g1-pro" },
+    { "input": "GPT-OSS 120B (Medium)", "expectedWire": "gpt-oss-120b-medium" },
+    { "input": "gemini-4-hydrogen-xhigh", "expectedWire": "gemini-4-hydrogen-xhigh" }
+  ]
+}

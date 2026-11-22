@@ -1,0 +1,43 @@
+{
+  "name": "agy-cli-prompt-enhancer",
+  "version": "2.1.0",
+  "description": "Token-efficient Prompt Enhancer toolkit for Antigravity CLI (PreInvocation plugin, Go ConPTY wrapper, fail-closed hook spec, and core engine).",
+  "author": {
+    "name": "Kyuzan0",
+    "url": "https://github.com/Kyuzan0"
+  },
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Kyuzan0/Enhance-Prompt-Antigravity.git"
+  },
+  "homepage": "https://github.com/Kyuzan0",
+  "bugs": {
+    "url": "https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/issues"
+  },
+  "keywords": [
+    "antigravity",
+    "agy",
+    "cli",
+    "prompt-enhancer",
+    "conpty",
+    "plugin"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "check": "node --check plugin/hook.mjs && node --check specs/fail-closed-hook/hook.mjs && node --check legacy-daemon/enhance.mjs && node --check scripts/package-plugin.mjs && node --check scripts/release.mjs && node --check scripts/auto-bump-on-commit.mjs",
+    "test:hook": "node specs/fail-closed-hook/hook.test.mjs",
+    "test:engine": "node core-engine/prompt-enhancer.test.mjs",
+    "verify:contracts": "node verify-contracts.mjs",
+    "verify": "npm run check && npm run test:hook && npm run test:engine && npm run verify:contracts",
+    "package": "node scripts/package-plugin.mjs",
+    "build": "npm run verify && npm run package",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "release:patch": "node scripts/release.mjs patch",
+    "release:minor": "node scripts/release.mjs minor",
+    "release:major": "node scripts/release.mjs major"
+  }
+}
