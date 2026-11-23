@@ -39,11 +39,12 @@ const (
 )
 
 type editorRequest struct {
-	Token        string `json:"token"`
-	ID           string `json:"id"`
-	Path         string `json:"path"`
-	Model        string `json:"model,omitempty"`
-	StripTrigger bool   `json:"strip_trigger,omitempty"`
+	Token        string           `json:"token"`
+	ID           string           `json:"id"`
+	Path         string           `json:"path"`
+	Model        string           `json:"model,omitempty"`
+	Settings     *wrapperSettings `json:"settings,omitempty"`
+	StripTrigger bool             `json:"strip_trigger,omitempty"`
 	// Expect is the immutable composer snapshot the wrapper observed for this
 	// request. When set, the decoded native export must equal it EXACTLY before
 	// any model call; a mismatch is refused with zero provider calls.
@@ -107,6 +108,12 @@ func setupEditorBridge() (*editorBridge, error) {
 		return nil, err
 	}
 	hardenEditorDir(dir)
+	if standaloneSettings != nil {
+		if err := os.WriteFile(filepath.Join(dir, "disabled-hook.json"), []byte(`{"enabled":false}`), 0o600); err != nil {
+			_ = os.RemoveAll(dir)
+			return nil, err
+		}
+	}
 
 	self, err := os.Executable()
 	if err != nil {
@@ -114,12 +121,18 @@ func setupEditorBridge() (*editorBridge, error) {
 	}
 
 	original := os.Getenv("EDITOR")
+	if standaloneSettings != nil && os.Getenv("VISUAL") != "" {
+		original = os.Getenv("VISUAL")
+	}
 	_ = os.Setenv(envEditorToken, token)
 	_ = os.Setenv(envEditorDir, dir)
 	_ = os.Setenv(envEditorOriginal, original)
 
 	helper := syscall.EscapeArg(self) + " " + editorHelperFlag
 	_ = os.Setenv("EDITOR", helper)
+	if standaloneSettings != nil {
+		_ = os.Setenv("VISUAL", helper)
+	}
 	return &editorBridge{dir: dir, token: token}, nil
 }
 
@@ -137,7 +150,7 @@ func (b *editorBridge) requestEnhancement(stripTrigger bool, expect string, rev 
 		return false
 	}
 	b.reqID = hex.EncodeToString(idRaw)
-	req := editorRequest{Token: b.token, ID: b.reqID, Path: "", Model: getCurrentModel(), StripTrigger: stripTrigger, Expect: expect, Revision: rev}
+	req := editorRequest{Token: b.token, ID: b.reqID, Model: getCurrentModel(), Settings: standaloneSettings, StripTrigger: stripTrigger, Expect: expect, Revision: rev}
 	buf, err := json.Marshal(req)
 	if err != nil {
 		return false
@@ -176,7 +189,13 @@ func (b *editorBridge) beginWithTrigger(w interface{ Write([]byte) (int, error) 
 	if b == nil || expect == "" || !b.requestEnhancement(stripTrigger, expect, rev) {
 		return false
 	}
+	if standaloneSettings != nil && outRenderer != nil {
+		outRenderer.armEditor()
+	}
 	_, err := w.Write([]byte{0x07})
+	if err != nil && standaloneSettings != nil && outRenderer != nil {
+		outRenderer.finishEditor()
+	}
 	if err == nil {
 		logDebug("[EDITOR-BRIDGE] editor request published; Ctrl+G forwarded")
 	}
@@ -187,7 +206,7 @@ func (b *editorBridge) beginWithTrigger(w interface{ Write([]byte) (int, error) 
 // exists for owned fixtures that must exercise the timeout path without a slow
 // upstream; unset, production keeps the 130 s window.
 func bridgeWaitTimeout() time.Duration {
-	const def = 130 * time.Second
+	def := standaloneSettings.timeout(120*time.Second) + 10*time.Second
 	raw := strings.TrimSpace(os.Getenv("AGY_WRAP_BRIDGE_TIMEOUT_MS"))
 	if raw == "" {
 		return def
@@ -384,7 +403,13 @@ func serveEnhancement(dir string, req editorRequest, path string) int {
 		return finish("error", err.Error(), nil)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	if req.Settings != nil {
+		if err := req.Settings.validate(); err != nil {
+			return finish("error", "pengaturan enhance tidak valid", nil)
+		}
+	}
+	settingsCtx := context.WithValue(context.Background(), rewriteSettingsKey{}, req.Settings)
+	ctx, cancel := context.WithTimeout(settingsCtx, req.Settings.timeout(120*time.Second))
 	defer cancel()
 	go func() {
 		ticker := time.NewTicker(250 * time.Millisecond)
@@ -417,7 +442,20 @@ func serveEnhancement(dir string, req editorRequest, path string) int {
 	res := enhanceForBridge(ctx, draft, model)
 	if ctx.Err() != nil {
 		writeEvidence(evidencePath, fullDraft)
+		if req.Settings != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return finish("timeout", "draft dipertahankan", &res)
+		}
 		return finish("canceled", "timeout", &res)
+	}
+	if res.Source == SourceRewriteFailed || res.Source == SourceRewriteTimeout {
+		status := "error"
+		if res.Source == SourceRewriteTimeout {
+			status = "timeout"
+		}
+		return finish(status, res.Reason, &res)
+	}
+	if req.Settings != nil && res.Text == draft {
+		return finish("unchanged", "", &res)
 	}
 	if res.Source == SourceUnresolvedModel {
 		writeEvidence(evidencePath, fullDraft)

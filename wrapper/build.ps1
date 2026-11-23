@@ -3,6 +3,10 @@
 param(
     [switch]$Deploy = $false,
 
+    [switch]$Standalone,
+
+    [switch]$Package,
+
     [string]$BinDir = $(if ($env:AGY_BIN_DIR) { $env:AGY_BIN_DIR } else { Join-Path $env:LOCALAPPDATA "agy\bin" }),
 
     [string]$ExpectedSHA256 = ""
@@ -13,6 +17,13 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptDir
+
+if ($Standalone -and $Deploy) {
+    throw "Use install-windows.ps1 to install the standalone agy-enhance.exe."
+}
+if ($Package -and -not $Standalone) {
+    throw "-Package requires -Standalone."
+}
 
 function Get-Sha256 {
     param([string]$LiteralPath)
@@ -60,7 +71,8 @@ if (Test-Path -LiteralPath $rootPkgPath -PathType Leaf) {
     if ($rootPkg.version) { $wrapVersion = [string]$rootPkg.version }
 }
 
-Write-Host "Compiling agy.exe (v$wrapVersion)..." -ForegroundColor DarkGray
+$outputName = if ($Standalone) { "agy-enhance.exe" } else { "agy.exe" }
+Write-Host "Compiling $outputName (v$wrapVersion)..." -ForegroundColor DarkGray
 $buildOut = Join-Path $scriptDir "agy-built.exe"
 if (Test-Path -LiteralPath $buildOut) {
     Remove-Item -LiteralPath $buildOut -Force
@@ -71,9 +83,11 @@ if ($LASTEXITCODE -ne 0) {
     throw "go build failed with exit code $LASTEXITCODE"
 }
 
-$candidate = Join-Path $scriptDir "agy.exe"
+$candidate = Join-Path $scriptDir $outputName
 Move-Item -LiteralPath $buildOut -Destination $candidate -Force
-Copy-Item -LiteralPath $candidate -Destination (Join-Path $scriptDir "agy-wrap.exe") -Force
+if (-not $Standalone) {
+    Copy-Item -LiteralPath $candidate -Destination (Join-Path $scriptDir "agy-wrap.exe") -Force
+}
 
 if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
     throw "Build failed: candidate not found at $candidate"
@@ -87,7 +101,18 @@ if ($ExpectedSHA256 -and ($candidateHash -ne $ExpectedSHA256.ToUpperInvariant())
 }
 $item = Get-Item -LiteralPath $candidate
 $sizeMb = [math]::Round($item.Length / 1MB, 2)
-Write-Host "[BUILD OK] agy.exe & agy-wrap.exe ($sizeMb MB) SHA-256 $candidateHash" -ForegroundColor Green
+Write-Host "[BUILD OK] $outputName ($sizeMb MB) SHA-256 $candidateHash" -ForegroundColor Green
+
+if ($Standalone) {
+    if ($Package) {
+        $rootDir = Split-Path -Parent $scriptDir
+        $archive = Join-Path $rootDir "agy-enhance-windows-amd64-$wrapVersion.zip"
+        Compress-Archive -LiteralPath @($candidate, (Join-Path $scriptDir "install-windows.ps1"), (Join-Path $rootDir "README.md"), (Join-Path $rootDir "LICENSE")) -DestinationPath $archive -Force
+        Write-Host "Windows package: $archive" -ForegroundColor Green
+    }
+    Write-Host "Install with install-windows.ps1." -ForegroundColor Cyan
+    exit 0
+}
 
 if (-not $Deploy) {
     Write-Host "Build only. Pass -Deploy to install; no active binary was touched." -ForegroundColor Yellow

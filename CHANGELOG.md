@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-11-23
+
+### Added
+- Provide a standalone Windows ConPTY launcher with configurable shortcut, language, detail, model, timeout, progress, and expiring rewrite status. Add a per-user PowerShell installer and Windows ZIP packaging without replacing the official CLI.
+
 ## [2.5.0] - 2026-11-23
 
 ### Added
@@ -89,7 +94,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial Antigravity CLI prompt enhancer plugin and hotkey daemon.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.5.0...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.3.4...v2.4.0
 [2.3.4]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.3.3...v2.3.4

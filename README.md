@@ -13,7 +13,7 @@ Toolkit peningkatan prompt independen untuk **Antigravity CLI (`agy`)** yang men
 | Komponen | Lokasi | Peran |
 |---|---|---|
 | **CLI Plugin & Skill `/enhance`** | [`plugin/`](plugin/) | Hook `PreInvocation` aditif ([`plugin/hook.mjs`](plugin/hook.mjs)) dengan mode `hybrid`/`llm`/`local`, flag `--version` / `--about`, pembacaan transkrip sesi, dan skill `/enhance` ([`plugin/skills/enhance/SKILL.md`](plugin/skills/enhance/SKILL.md)). |
-| **Go ConPTY CLI Wrapper** | [`wrapper/`](wrapper/) | Wrapper Go (`module ctrle-interceptor`) di atas `agy-real.exe` untuk shortcut terminal `Ctrl+E`, native editor bridge `Ctrl+G`, `--wrap-version`, trigger `!enhance`/`/enhance` sebelum Enter, dan proteksi paste-chip. |
+| **Windows ConPTY Launcher** | [`wrapper/`](wrapper/) | `agy-enhance.exe` menjalankan `agy.exe` resmi dengan shortcut rewrite sebelum Enter, pengaturan, dan proteksi paste chip. |
 | **Linux CLI Launcher** | [`wrapper/linux/`](wrapper/linux/) | `Ctrl+E` untuk rewrite draft teks di Kubuntu dengan editor native, pengaturan model, dan mode offline. |
 | **Fail-Closed Hook Spec** | [`specs/fail-closed-hook/`](specs/fail-closed-hook/) | Spesifikasi hook `PreInvocation` *fail-closed* ([`hook.mjs`](specs/fail-closed-hook/hook.mjs)) yang menghentikan turn jika model kanonik tidak valid atau kontrak replace-draft tidak tersedia. |
 | **Core Engine (ESM/TS)** | [`core-engine/`](core-engine/) | Modul engine modular standalone ([`prompt-enhancer.mjs`](core-engine/prompt-enhancer.mjs) / `.ts`) dengan validasi payload, sanitasi anti-injection, dan retry backoff. |
@@ -89,15 +89,35 @@ agy plugin validate ./plugin
 agy plugin install ./plugin
 ```
 
-### 3. Go ConPTY CLI Wrapper (`wrapper/`)
+### 3. Windows / PowerShell (`Ctrl+E`)
+
+Gunakan **Windows Terminal dengan profil PowerShell**. Installer mendukung Windows PowerShell 5.1 dan PowerShell 7. Paket Windows AMD64 memuat launcher yang sudah dikompilasi. Pastikan CLI resmi bisa dijalankan dengan `agy --version`.
 
 ```powershell
-# Build saja (otomatis menyuntikkan versi dari package.json)
-powershell -ExecutionPolicy Bypass -File wrapper/build.ps1
-
-# Build dan deploy aman ke %LOCALAPPDATA%\agy\bin
-powershell -ExecutionPolicy Bypass -File wrapper/build.ps1 -Deploy
+Expand-Archive .\agy-enhance-windows-amd64-2.6.0.zip -DestinationPath .\agy-enhance-windows
+powershell -NoProfile -ExecutionPolicy Bypass -File .\agy-enhance-windows\install-windows.ps1
 ```
+
+Buka terminal baru setelah instalasi dan jalankan:
+
+```powershell
+agy-enhance --wrap-version
+agy-enhance settings menu
+agy-enhance
+```
+
+Ketik draft, tekan **Ctrl+E**, lalu tinjau hasil sebelum Enter. Tekan shortcut yang sama lagi untuk membatalkan. Selama model bekerja, status menampilkan waktu berjalan. Status hasil hilang setelah sekitar tujuh detik. Pilihan pengaturan sama dengan Linux, dengan file di `%APPDATA%\agy-prompt-enhancer\settings.json`. Mode `native` memakai model konfigurasi, lalu `--model`, lalu default CLI. Mode `local` merapikan teks biasa secara offline.
+
+Installer menempatkan launcher di `%LOCALAPPDATA%\agy-prompt-enhancer\bin` dan menambahkannya ke PATH pengguna. Gunakan `agy` resmi untuk penggunaan biasa dan pembaruan. Jika biner berada di lokasi khusus, set `$env:AGY_REAL_PATH = 'C:\path\to\agy.exe'` sebelum menjalankan launcher.
+
+Untuk build dari source, jalankan perintah berikut di PowerShell dengan Go terpasang.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\wrapper\build.ps1 -Standalone
+powershell -ExecutionPolicy Bypass -File .\wrapper\install-windows.ps1
+```
+
+Untuk membuat paket distribusi dari source, tambahkan `-Package` saat build. Untuk mencopot launcher, jalankan installer dengan `-Uninstall`.
 
 ## Alur Versioning, Changelog, & Packaging
 
@@ -161,7 +181,8 @@ Lihat prosedur acceptance live di [docs/RUNBOOK_CLI_ACCEPTANCE.md](docs/RUNBOOK_
 ## Uninstall & Rollback
 
 - **CLI Plugin:** `powershell -ExecutionPolicy Bypass -File plugin/install-plugin.ps1 -Uninstall`
-- **Go ConPTY Wrapper:** Pulihkan `agy-real.exe` ke `%LOCALAPPDATA%\agy\bin\agy.exe` (atau dari folder `backup_build_deploy_*` yang dibuat oleh `wrapper/build.ps1 -Deploy`).
+- **Windows standalone:** Jalankan `install-windows.ps1 -Uninstall`.
+- **Wrapper lama yang dipasang dengan `-Deploy`:** Pulihkan `agy-real.exe` ke `%LOCALAPPDATA%\agy\bin\agy.exe` (atau dari folder `backup_build_deploy_*` yang dibuat oleh `wrapper/build.ps1 -Deploy`).
 
 ## Author, Credits & Changelog
 

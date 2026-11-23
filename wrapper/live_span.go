@@ -70,6 +70,7 @@ func beginSpanEnhancement(draft []rune, payload string, model string, outHandle 
 	ownerGeometry := geometryEpoch.Load()
 	emitMu.Unlock()
 
+	startRewriteStatus()
 	isBusyState.Store(true)
 	storeEnhanceKind(enhanceKindSpan)
 	toastMessage.Store(nil)
@@ -77,6 +78,19 @@ func beginSpanEnhancement(draft []rune, payload string, model string, outHandle 
 	paintStatus()
 
 	go runSpanEnhancement(ctx, cancel, plan, append([]rune(nil), draft...), ownerEpoch, ownerGeometry, model, outHandle)
+	if standaloneSettings != nil {
+		owner := rewriteStarted.Load()
+		go func() {
+			ticker := time.NewTicker(250 * time.Millisecond)
+			defer ticker.Stop()
+			for range ticker.C {
+				if !isBusyState.Load() || rewriteStarted.Load() != owner {
+					return
+				}
+				paintStatus()
+			}
+		}()
+	}
 	return true
 }
 

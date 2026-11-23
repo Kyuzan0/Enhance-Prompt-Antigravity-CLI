@@ -1035,6 +1035,9 @@ func (t *composerTracker) rowsBelowAreStatus(bottom int) bool {
 		if row == bottom+1 && wrapperOwnsStatusText(text) {
 			continue
 		}
+		if standaloneSettings != nil && row == bottom+1 && isStandaloneModelStatus(text) {
+			continue
+		}
 		return false
 	}
 	return true
@@ -1071,7 +1074,13 @@ func isEnhancerStatusText(text string) bool {
 		"Draft berisi tempelan",
 		"Editor tidak mengembalikan",
 	}
-	text = strings.TrimLeft(text, " \x00✦⏳")
+	text = strings.TrimLeft(text, " \x00✦⏳|/-\\")
+	if standaloneSettings != nil && (strings.HasPrefix(text, "Membatalkan enhance prompt") ||
+		strings.HasPrefix(text, "Draft tidak berubah") ||
+		strings.HasPrefix(text, "Enhance selesai") ||
+		strings.HasPrefix(text, "Enhance dibatalkan")) {
+		return true
+	}
 	for _, n := range needles {
 		if strings.HasPrefix(text, n) {
 			return true

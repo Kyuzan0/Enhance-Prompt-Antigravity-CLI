@@ -5,6 +5,7 @@ legacy-daemon/README.md
 
 # Tests, smoke scripts, test specs, and binary test fixtures
 *_test.go
+!wrapper/standalone_test.go
 *.test.*
 !core-engine/prompt-enhancer.test.mjs
 !specs/fail-closed-hook/hook.test.mjs

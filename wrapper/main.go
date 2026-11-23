@@ -172,10 +172,16 @@ var statusFilePath = filepath.Join(os.TempDir(), "agy-statusline.txt")
 // and must not let a second, possibly stale, copy render below it. The file
 // remains readable ASCII; the idle text is restored on exit for plain runs.
 func syncStatusFile(_ bool) {
+	if standaloneSettings != nil {
+		return
+	}
 	_ = os.WriteFile(statusFilePath, []byte(" "), 0644)
 }
 
 func restoreNativeStatusLine() {
+	if standaloneSettings != nil {
+		return
+	}
 	_ = os.WriteFile(statusFilePath, []byte(idleStatusText), 0644)
 }
 
@@ -195,6 +201,19 @@ func getCurrentModel() string {
 }
 
 func getBusyHint() string {
+	if standaloneSettings != nil {
+		started := rewriteStarted.Load()
+		elapsed := time.Since(time.Unix(0, started))
+		if started == 0 || elapsed < 0 {
+			elapsed = 0
+		}
+		spinner := "|/-\\"[int(elapsed/(250*time.Millisecond))%4]
+		if rewriteCancelling.Load() {
+			return fmt.Sprintf("\x1b[33m%c Membatalkan enhance prompt (%ds)\x1b[0m", spinner, int(elapsed/time.Second))
+		}
+		return fmt.Sprintf("\x1b[33m%c Enhance prompt sedang berlangsung (%ds) · %s untuk batal\x1b[0m",
+			spinner, int(elapsed/time.Second), shortcutLabel())
+	}
 	return busyHintStr
 }
 
@@ -204,6 +223,9 @@ func getCurrentHint() string {
 	}
 	if isBusyState.Load() {
 		return getBusyHint()
+	}
+	if standaloneSettings != nil {
+		return "\x1b[90m✦ Enhance Prompt = \x1b[36m" + shortcutLabel() + "\x1b[0m"
 	}
 	return idleHintStr
 }
@@ -1116,18 +1138,19 @@ func isNativeBinaryCandidate(path, selfClean string, requireNativeSize bool) (st
 // wrapper binary (even across agy-wrap.exe -> agy.exe) and tolerates the brief
 // rename window during background self-updates.
 func findAgyBinary() (string, error) {
-	// 1. Explicit override via environment variable
-	if custom := os.Getenv("AGY_REAL_PATH"); custom != "" {
-		if p, ok := isNativeBinaryCandidate(custom, "", false); ok {
-			return p, nil
-		}
-	}
-
 	selfExe, err := os.Executable()
 	var selfDir, selfClean string
 	if err == nil {
 		selfClean = filepath.Clean(selfExe)
 		selfDir = filepath.Dir(selfClean)
+	}
+	if standaloneName(selfClean) || standaloneSettings != nil {
+		return findStandaloneAgy(selfClean)
+	}
+	if custom := os.Getenv("AGY_REAL_PATH"); custom != "" {
+		if p, ok := isNativeBinaryCandidate(custom, selfClean, false); ok {
+			return p, nil
+		}
 	}
 
 	localAppData := os.Getenv("LOCALAPPDATA")
@@ -1203,6 +1226,49 @@ func findAgyBinary() (string, error) {
 	}
 
 	return "", fmt.Errorf("could not find real Antigravity binary ('agy-real.exe'). Ensure original agy.exe was renamed to agy-real.exe in %s", selfDir)
+}
+
+func findStandaloneAgy(self string) (string, error) {
+	selfInfo, _ := os.Stat(self)
+	candidate := func(path string, requireSize bool) (string, bool) {
+		absolute, err := filepath.Abs(path)
+		if err != nil || path == "" {
+			return "", false
+		}
+		path, ok := isNativeBinaryCandidate(absolute, self, requireSize)
+		if !ok {
+			return "", false
+		}
+		info, err := os.Stat(path)
+		return path, err == nil && (selfInfo == nil || !os.SameFile(selfInfo, info))
+	}
+	if override := os.Getenv("AGY_REAL_PATH"); override != "" {
+		if path, ok := candidate(override, false); ok {
+			return path, nil
+		}
+		return "", errors.New("AGY_REAL_PATH does not point to a usable native agy executable")
+	}
+	if path, err := exec.LookPath("agy.exe"); err == nil {
+		if resolved, ok := candidate(path, true); ok {
+			return resolved, nil
+		}
+	}
+	var candidates []string
+	if appData := os.Getenv("LOCALAPPDATA"); appData != "" {
+		candidates = append(candidates, filepath.Join(appData, "agy", "bin", "agy.exe"))
+	}
+	if profile := os.Getenv("USERPROFILE"); profile != "" {
+		candidates = append(candidates, filepath.Join(profile, ".gemini", "bin", "agy.exe"))
+	}
+	if appData := os.Getenv("LOCALAPPDATA"); appData != "" {
+		candidates = append(candidates, filepath.Join(appData, "agy", "bin", "agy-real.exe"))
+	}
+	for _, path := range candidates {
+		if resolved, ok := candidate(path, true); ok {
+			return resolved, nil
+		}
+	}
+	return "", errors.New("official agy.exe not found; install Antigravity CLI or set AGY_REAL_PATH")
 }
 
 type ActionType int
@@ -2416,6 +2482,23 @@ func tryParseConPTYWrappedVT(buf []byte, startIdx int) ([]byte, int, bool) {
 	return nil, 0, false
 }
 
+func classifyWrapperEvent(raw []byte) (ActionType, rune) {
+	if standaloneSettings == nil {
+		return classifyEvent(raw)
+	}
+	if matched, press := shortcutEvent(raw, standaloneSettings.Shortcut); matched {
+		if press {
+			return ActionCtrlE, 0
+		}
+		return ActionKeyUpIgnore, 0
+	}
+	action, char := classifyEvent(raw)
+	if action == ActionCtrlE || action == ActionKeyUpIgnore {
+		return ActionUnknown, 0
+	}
+	return action, char
+}
+
 func parseInputEvents(buf []byte) ([]ParsedEvent, int) {
 	var events []ParsedEvent
 	n := len(buf)
@@ -2424,7 +2507,7 @@ func parseInputEvents(buf []byte) ([]ParsedEvent, int) {
 	for i < n {
 		// 1. Check for ConPTY-wrapped VT sequence first (e.g. Ghostty/Kitty in enowX)
 		if vtSeq, consumed, ok := tryParseConPTYWrappedVT(buf, i); ok {
-			action, ch := classifyEvent(vtSeq)
+			action, ch := classifyWrapperEvent(vtSeq)
 			events = append(events, ParsedEvent{
 				Action:   action,
 				Char:     ch,
@@ -2439,6 +2522,13 @@ func parseInputEvents(buf []byte) ([]ParsedEvent, int) {
 				break
 			}
 
+			if standaloneSettings != nil && ((buf[i+1] >= 'a' && buf[i+1] <= 'z') || (buf[i+1] >= 'A' && buf[i+1] <= 'Z')) {
+				raw := buf[i : i+2]
+				action, ch := classifyWrapperEvent(raw)
+				events = append(events, ParsedEvent{Action: action, Char: ch, RawBytes: raw})
+				i += 2
+				continue
+			}
 			if buf[i+1] == '[' {
 				endIdx := -1
 				for j := i + 2; j < n; j++ {
@@ -2456,7 +2546,7 @@ func parseInputEvents(buf []byte) ([]ParsedEvent, int) {
 						break
 					}
 					raw := buf[i : i+1]
-					action, ch := classifyEvent(raw)
+					action, ch := classifyWrapperEvent(raw)
 					events = append(events, ParsedEvent{
 						Action:   action,
 						Char:     ch,
@@ -2467,7 +2557,7 @@ func parseInputEvents(buf []byte) ([]ParsedEvent, int) {
 				}
 
 				raw := buf[i : endIdx+1]
-				action, ch := classifyEvent(raw)
+				action, ch := classifyWrapperEvent(raw)
 				events = append(events, ParsedEvent{
 					Action:   action,
 					Char:     ch,
@@ -2484,7 +2574,7 @@ func parseInputEvents(buf []byte) ([]ParsedEvent, int) {
 		}
 
 		raw := buf[i : i+size]
-		action, ch := classifyEvent(raw)
+		action, ch := classifyWrapperEvent(raw)
 		events = append(events, ParsedEvent{
 			Action:   action,
 			Char:     ch,
@@ -2497,6 +2587,14 @@ func parseInputEvents(buf []byte) ([]ParsedEvent, int) {
 }
 
 func printWrapHelp() {
+	self, _ := os.Executable()
+	if standaloneName(self) {
+		fmt.Printf("agy-enhance Windows v%s — %s\nUsage: agy-enhance [agy arguments]\n"+
+			"agy-enhance settings menu   Configure shortcut, detail, language, model and timeout\n"+
+			"agy-enhance --wrap-version  Show the wrapper version\n"+
+			"Press the configured shortcut to enhance the draft or press it again to cancel.\n", WrapperVersion, WrapperAuthor)
+		return
+	}
 	fmt.Printf(`Antigravity ConPTY Interceptor Wrapper (agy) v%s — Created by %s
 Usage: agy [wrapper-options] [agy options...]
 
@@ -2598,7 +2696,7 @@ func applyPendingDraftMirror(draft []rune, w byteWriter) []rune {
 // visibility window ends. It only clears the pointer it owns, so a newer
 // enhancement's toast is never removed by an older timer.
 func keepToastVisible(tm *string, outHandle windows.Handle) {
-	deadline := time.Now().Add(5800 * time.Millisecond)
+	deadline := time.Now().Add(7 * time.Second)
 	for time.Now().Before(deadline) {
 		if toastMessage.Load() != tm {
 			return
@@ -2611,8 +2709,18 @@ func keepToastVisible(tm *string, outHandle windows.Handle) {
 	}
 }
 
+var rewriteStarted atomic.Int64
+var rewriteCancelling atomic.Bool
+
+func startRewriteStatus() {
+	rewriteStarted.Store(time.Now().UnixNano())
+	rewriteCancelling.Store(false)
+}
+
 func watchEditorBridge(bridge *editorBridge, outHandle windows.Handle) {
 	epoch := bridgeEpoch.Add(1)
+	startRewriteStatus()
+	storeEnhanceKind(enhanceKindEditor)
 	isBusyState.Store(true)
 	toastMessage.Store(nil)
 	syncStatusFile(true)
@@ -2647,6 +2755,7 @@ func watchEditorBridge(bridge *editorBridge, outHandle windows.Handle) {
 				return
 			}
 			isBusyState.Store(false)
+			storeEnhanceKind(enhanceKindNone)
 			writeEvidence(strings.TrimSpace(os.Getenv("AGY_WRAP_EVIDENCE_IDLE_PATH")), "idle")
 			syncStatusFile(false)
 			if tm := toastMessage.Load(); tm != nil {
@@ -2664,6 +2773,9 @@ func watchEditorBridge(bridge *editorBridge, outHandle windows.Handle) {
 		done, ok := bridge.wait(bridgeWaitTimeout())
 		if bridgeEpoch.Load() != epoch {
 			return
+		}
+		if standaloneSettings != nil && outRenderer != nil {
+			outRenderer.waitEditorFrame()
 		}
 		if ok && !bridge.ownsDone(done) {
 			logDebug("[BRIDGE] stale result ignored: id=%s rev=%d", done.ID, done.Revision)
@@ -2698,9 +2810,21 @@ func watchEditorBridge(bridge *editorBridge, outHandle windows.Handle) {
 				model = "AI Model"
 			}
 			msg = fmt.Sprintf("\x1b[32m✦ Enhanced via editor with %s (%.1fs)!\x1b[0m", model, done.Duration)
+			if standaloneSettings != nil {
+				msg = fmt.Sprintf("\x1b[32m✦ Enhance selesai (%.1fs)\x1b[0m", done.Duration)
+			}
 		case "canceled":
 			endRewriteWithoutResync()
 			msg = "\x1b[33m✦ Enhancement dibatalkan\x1b[0m" + strings.Repeat(" ", 26)
+			if standaloneSettings != nil {
+				msg = "\x1b[33m✦ Enhance dibatalkan\x1b[0m"
+			}
+		case "unchanged":
+			endRewriteWithoutResync()
+			msg = "✦ Draft tidak berubah"
+		case "timeout":
+			endRewriteWithoutResync()
+			msg = "\x1b[33m✦ Enhancement timeout; draft dipertahankan\x1b[0m"
 		default:
 			endRewriteWithoutResync()
 			msg = "\x1b[31m✦ Enhancement gagal: " + done.Detail + "\x1b[0m"
@@ -2774,11 +2898,48 @@ func main() {
 			os.Exit(runEditorHelper(os.Args[2:]))
 		}
 	}
+	self, _ := os.Executable()
+	if standaloneName(self) {
+		path, err := settingsPath()
+		if err == nil && len(os.Args) > 1 && os.Args[1] == "settings" {
+			if err = manageWrapperSettings(path, os.Args[2:], os.Stdin, os.Stdout); err == nil {
+				return
+			}
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "[agy-enhance]", err)
+			os.Exit(1)
+		}
+	}
 
 	// Non-TUI subcommands/flags (update, models, --version, -p, etc.) bypass
 	// ConPTY and must never touch %TEMP%\agy-statusline.txt.
 	if isNonInteractiveInvocation(os.Args[1:]) {
 		os.Exit(runDirectPassthrough(os.Args[1:]))
+	}
+	if standaloneName(self) {
+		var mode uint32
+		if windows.GetConsoleMode(windows.Handle(os.Stdin.Fd()), &mode) != nil ||
+			windows.GetConsoleMode(windows.Handle(os.Stdout.Fd()), &mode) != nil {
+			os.Exit(runDirectPassthrough(os.Args[1:]))
+		}
+		path, _ := settingsPath()
+		settings, err := loadWrapperSettings(path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "[agy-enhance]", err)
+			os.Exit(1)
+		}
+		if settings.Mode == "off" {
+			os.Exit(runDirectPassthrough(os.Args[1:]))
+		}
+		if settings.Model == "" {
+			settings.Model = modelFromArguments(os.Args[1:])
+		}
+		if err := settings.validate(); err != nil {
+			fmt.Fprintln(os.Stderr, "[agy-enhance]", err)
+			os.Exit(1)
+		}
+		standaloneSettings = &settings
 	}
 
 	syncStatusFile(false)
@@ -2796,6 +2957,10 @@ func main() {
 
 	editorBridgeHandle, bridgeErr := setupEditorBridge()
 	if bridgeErr != nil {
+		if standaloneSettings != nil {
+			fmt.Fprintln(os.Stderr, "[agy-enhance] editor bridge:", bridgeErr)
+			os.Exit(1)
+		}
 		logDebug("[EDITOR-BRIDGE] setup failed: %v", bridgeErr)
 		editorBridgeHandle = nil
 	}
@@ -2817,6 +2982,14 @@ func main() {
 			passthroughArgs = append(passthroughArgs, arg)
 		}
 	}
+	if standaloneSettings != nil {
+		passthroughArgs, err = standaloneSessionArgs(passthroughArgs, editorBridgeHandle.dir)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "[agy-enhance]", err)
+			editorBridgeHandle.cleanup()
+			os.Exit(1)
+		}
+	}
 
 	cmdParts := []string{syscall.EscapeArg(agyBin)}
 	for _, arg := range passthroughArgs {
@@ -2831,14 +3004,14 @@ func main() {
 	hasInConsole := windows.GetConsoleMode(inHandle, &origInMode) == nil
 	hasOutConsole := windows.GetConsoleMode(outHandle, &origOutMode) == nil
 
-	defer func() {
+	restoreConsole := func() {
 		if hasInConsole {
 			_ = windows.SetConsoleMode(inHandle, origInMode)
 		}
 		if hasOutConsole {
 			_ = windows.SetConsoleMode(outHandle, origOutMode)
 		}
-	}()
+	}
 
 	if hasInConsole {
 		rawInMode := origInMode
@@ -2855,6 +3028,8 @@ func main() {
 
 	cpty, err := conpty.Start(cmdLine, conpty.ConPtyDimensions(w, h))
 	if err != nil {
+		restoreConsole()
+		editorBridgeHandle.cleanup()
 		fmt.Fprintf(os.Stderr, "Failed to start ConPTY for %s: %v\n", agyBin, err)
 		logDebug("Failed to start ConPTY for %s: %v", agyBin, err)
 		restoreNativeStatusLine()
@@ -2904,10 +3079,12 @@ func main() {
 
 	var wg sync.WaitGroup
 	wg.Add(2)
+	outputDone := make(chan struct{})
 
 	// Goroutine 1: PTY Output -> os.Stdout
 	go func() {
 		defer wg.Done()
+		defer close(outputDone)
 		var leftover []byte
 		readBuf := make([]byte, 8192)
 		sawChip := false
@@ -2941,6 +3118,9 @@ func main() {
 				}
 			}
 			outputFrames.Add(1)
+			if standaloneSettings != nil {
+				outRenderer.paint()
+			}
 		}
 		for {
 			n, err := cpty.Read(readBuf)
@@ -3015,6 +3195,7 @@ func main() {
 		var draftRunes []rune
 		var leftover []byte
 		var inBracketedPaste bool
+		var dropBusyPaste bool
 		var pendingPasteCR bool
 		var pendingHighSurrogate rune
 		var pasteBytes int
@@ -3184,6 +3365,23 @@ func main() {
 			leftover = append([]byte(nil), chunk[consumed:]...)
 
 			for _, ev := range events {
+				if standaloneSettings != nil {
+					if ev.Action == ActionBracketedPasteStart {
+						dropBusyPaste = isBusyState.Load()
+					}
+					if dropBusyPaste {
+						if ev.Action == ActionBracketedPasteEnd {
+							dropBusyPaste = false
+						}
+						continue
+					}
+					if inBracketedPaste && ev.Action == ActionCtrlE {
+						ev.Action = ActionUnknown
+					}
+					if isBusyState.Load() && ev.Action != ActionCtrlE {
+						continue
+					}
+				}
 				heldTriggerDraft = false
 				draftRunes = applyPendingDraftMirror(draftRunes, cpty)
 				draftRunes = applyPendingShadowOverride(draftRunes)
@@ -3354,6 +3552,19 @@ func main() {
 					// span job honours cancellation only during its model phase; the
 					// atomic keystroke commit ignores it, so this never mutates.
 					if isBusyState.Load() {
+						if standaloneSettings != nil {
+							rewriteCancelling.Store(true)
+							enhanceMu.Lock()
+							if enhanceCancel != nil {
+								enhanceCancel()
+							}
+							enhanceMu.Unlock()
+							if enhanceKind.Load() == enhanceKindEditor {
+								editorBridgeHandle.cancel()
+							}
+							paintStatus()
+							continue
+						}
 						enhanceMu.Lock()
 						if enhanceCancel != nil {
 							enhanceCancel()
@@ -3422,7 +3633,7 @@ func main() {
 						continue
 					case composerGatePending:
 						logDebug("[STDIN] Ctrl+E deferred: paste classification pending")
-						warn := "\x1b[33m✦ Tempelan masih diproses; tekan Ctrl+E lagi sebentar lagi.\x1b[0m"
+						warn := fmt.Sprintf("\x1b[33m✦ Tempelan masih diproses; tekan %s lagi sebentar lagi.\x1b[0m", shortcutLabel())
 						toastMessage.Store(&warn)
 						paintStatus()
 						go func() {
@@ -3482,7 +3693,7 @@ func main() {
 						if errors.Is(err, ErrEmptyDraft) {
 							logDebug("[STDIN] Ctrl+E ignored because draft is empty")
 							_, _ = os.Stdout.Write([]byte("\a"))
-							warn := "\x1b[31m✦ Tulis prompt lebih dulu sebelum Ctrl+E\x1b[0m" + strings.Repeat(" ", 29)
+							warn := fmt.Sprintf("\x1b[31m✦ Tulis prompt lebih dulu sebelum %s\x1b[0m", shortcutLabel()) + strings.Repeat(" ", 29)
 							toastMessage.Store(&warn)
 							paintStatus()
 							go func() {
@@ -3496,7 +3707,7 @@ func main() {
 						}
 						if errors.Is(err, ErrNonSemanticDraft) {
 							logDebug("[STDIN] Ctrl+E rejected non-semantic input (length=%d)", len(draftRunes))
-							warn := "\x1b[33m✦ Tulis instruksi tugas yang jelas sebelum Ctrl+E\x1b[0m" + strings.Repeat(" ", 22)
+							warn := fmt.Sprintf("\x1b[33m✦ Tulis instruksi tugas yang jelas sebelum %s\x1b[0m", shortcutLabel()) + strings.Repeat(" ", 22)
 							toastMessage.Store(&warn)
 							paintStatus()
 							go func() {
@@ -3838,6 +4049,15 @@ func main() {
 	}
 
 	logDebug("=== agy-wrapper exited with code %d ===", exitCode)
+	if standaloneSettings != nil && outRenderer != nil {
+		select {
+		case <-outputDone:
+		case <-time.After(150 * time.Millisecond):
+		}
+		outRenderer.restoreTerminal()
+	}
+	editorBridgeHandle.cleanup()
+	restoreConsole()
 	restoreNativeStatusLine()
 	os.Exit(int(exitCode))
 }

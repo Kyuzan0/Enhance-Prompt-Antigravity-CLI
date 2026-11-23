@@ -5,6 +5,8 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
+	"unicode"
 )
 
 // outputRenderer is the single serialized writer for both child output and the
@@ -19,6 +21,7 @@ type outputRenderer struct {
 	t         *composerTracker
 	lastRow   int // zero-based; -1 when nothing is painted
 	lastPlain string
+	screen    editorScreen
 }
 
 func newOutputRenderer(w io.Writer, t *composerTracker) *outputRenderer {
@@ -34,6 +37,9 @@ func (r *outputRenderer) writeChild(b []byte) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if standaloneSettings != nil {
+		b = r.screen.filter(b)
+	}
 	r.t.Feed(b)
 	_, _ = r.w.Write(b)
 }
@@ -51,11 +57,30 @@ func (r *outputRenderer) paint() {
 }
 
 func (r *outputRenderer) paintLocked() {
-	ansi := getCurrentHint()
-	plain := strings.TrimSpace(reAnsi.ReplaceAllString(ansi, ""))
 	row, ok := r.t.statusSlot()
 	if !ok {
 		r.clearOwnedLocked()
+		return
+	}
+	ansi := getCurrentHint()
+	plain := strings.TrimSpace(reAnsi.ReplaceAllString(ansi, ""))
+	if standaloneSettings != nil {
+		label := getCurrentModel()
+		if nativeStatus := strings.TrimSpace(r.t.line(row)); isStandaloneModelStatus(nativeStatus) {
+			label = nativeStatus
+		}
+		if label != "" && !strings.ContainsFunc(label, unicode.IsControl) {
+			plain += "  ·  " + label
+		}
+		width := len([]rune(r.t.line(row)))
+		cells := []rune(plain)
+		if width >= 4 && len(cells) >= width-1 {
+			cells = cells[:width-2]
+		}
+		plain = string(cells)
+		ansi = plain
+	}
+	if r.lastRow == row && r.lastPlain == plain && strings.TrimSpace(r.t.line(row)) == plain {
 		return
 	}
 	if r.lastRow >= 0 && r.lastRow != row {
@@ -65,6 +90,41 @@ func (r *outputRenderer) paintLocked() {
 	r.t.Feed([]byte(seq))
 	_, _ = io.WriteString(r.w, seq)
 	r.lastRow, r.lastPlain = row, plain
+}
+
+func (r *outputRenderer) armEditor() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.screen.armed = r.screen.alternate
+}
+
+func (r *outputRenderer) finishEditor() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, _ = io.WriteString(r.w, r.screen.release())
+}
+
+func (r *outputRenderer) waitEditorFrame() {
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		r.mu.Lock()
+		pending := r.screen.pending()
+		r.mu.Unlock()
+		if !pending {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	r.finishEditor()
+}
+
+func (r *outputRenderer) restoreTerminal() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.screen.alternate {
+		_, _ = io.WriteString(r.w, exitAlternate+"\x1b[?25h")
+		r.screen = editorScreen{}
+	}
 }
 
 // clearOwnedLocked erases the previous overlay only when the rendered frame
