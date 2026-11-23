@@ -1,6 +1,6 @@
 {
   "name": "agy-cli-prompt-enhancer",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "Token-efficient Prompt Enhancer toolkit for Antigravity CLI (PreInvocation plugin, Go ConPTY wrapper, fail-closed hook spec, and core engine).",
   "author": {
     "name": "Kyuzan0",
