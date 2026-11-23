@@ -71,7 +71,7 @@ function loadConfig() {
         Object.assign(config, parsed);
         break;
       } catch (err) {
-        logStructured('WARN', 'config_parse_failed', { file: cfgPath, error: err.message });
+        logStructured('WARN', 'config_parse_failed', { code: err.code });
       }
     }
   }
@@ -324,7 +324,7 @@ function extractSessionTranscript(payload) {
 
     return { turns, formatted, latestFunction, latestConstraint, latestDecision, explicitCorrections };
   } catch (err) {
-    logStructured('WARN', 'transcript_read_failed', { targetPath, error: err.message });
+    logStructured('WARN', 'transcript_read_failed', { code: err.code });
     return { turns: [], formatted: '', latestDecision: null, explicitCorrections: [] };
   }
 }
@@ -551,8 +551,10 @@ async function callFastLlm(draft, markers, config, resolvedModel, traceId, sessi
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`LLM API returned ${response.status}: ${errorText.slice(0, 200)}`);
+    await response.body?.cancel().catch(() => {});
+    const error = new Error('LLM API request failed');
+    error.httpStatus = response.status;
+    throw error;
   }
 
   const data = await response.json();
@@ -585,7 +587,7 @@ async function main() {
       inputBuffer += chunk;
     }
   } catch (err) {
-    logStructured('ERROR', 'stdin_read_failed', { traceId, error: err.message });
+    logStructured('ERROR', 'stdin_read_failed', { traceId, code: err.code });
   }
 
   const defaultResult = { injectSteps: [] };
@@ -599,8 +601,8 @@ async function main() {
   let payload;
   try {
     payload = JSON.parse(inputBuffer);
-  } catch (err) {
-    logStructured('ERROR', 'stdin_json_invalid', { traceId, error: err.message });
+  } catch {
+    logStructured('ERROR', 'stdin_json_invalid', { traceId });
     process.stdout.write(JSON.stringify(defaultResult) + '\n');
     process.exit(0);
   }
@@ -659,7 +661,7 @@ async function main() {
   // apply pure identity fallback directly as required by GOA:
   // "missing context MUST not assert prior conversation, preserve reference unresolved; use identity fallback untuk reference unresolved bila tak ada context, tanpa menambah tugas."
   if (detectAmbiguity(draft) && (!sessionContext || !sessionContext.turns || sessionContext.turns.length === 0)) {
-    logStructured('INFO', 'unresolved_reference_identity_fallback', { traceId, draft });
+    logStructured('INFO', 'unresolved_reference_identity_fallback', { traceId });
     enhancedSpec = draft.trim();
     method = 'identity-fallback';
   } else if (config.mode === 'hybrid' || config.mode === 'llm') {
@@ -673,7 +675,7 @@ async function main() {
         logStructured('WARN', 'fast_llm_failed_fallback_local', {
           traceId,
           resolvedModel,
-          error: err.message,
+          httpStatus: err.httpStatus,
         });
         if (config.mode === 'llm') {
           enhancedSpec = synthesizeConservativePrompt(draft, markers, sessionContext);
@@ -733,8 +735,8 @@ async function main() {
   process.exit(0);
 }
 
-main().catch(err => {
-  logStructured('ERROR', 'fatal_uncaught_error', { error: err.message, stack: err.stack });
+main().catch(() => {
+  logStructured('ERROR', 'fatal_uncaught_error');
   process.stdout.write(JSON.stringify({ injectSteps: [] }) + '\n');
   process.exit(0);
 });

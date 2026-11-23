@@ -59,6 +59,36 @@ function Write-DeployManifest {
     ($Data | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $LiteralPath -Encoding ASCII
 }
 
+function Write-ThirdPartyNotices {
+    param([string]$LiteralPath)
+
+    $goRoot = go env GOROOT
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($goRoot)) {
+        throw "Unable to locate the Go toolchain license."
+    }
+
+    $dependencies = go list -deps -f '{{with .Module}}{{if not .Main}}{{.Path}} {{.Dir}}{{end}}{{end}}' .
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to list Go dependencies for the Windows package."
+    }
+
+    $notices = @(
+        'Go standard library'
+        (Get-Content -LiteralPath (Join-Path $goRoot 'LICENSE') -Raw -Encoding UTF8).TrimEnd()
+        'Go patent grant'
+        (Get-Content -LiteralPath (Join-Path $goRoot 'PATENTS') -Raw -Encoding UTF8).TrimEnd()
+        foreach ($dependency in ($dependencies | Where-Object { $_ } | Sort-Object -Unique)) {
+            $name, $directory = $dependency -split ' ', 2
+            if ([string]::IsNullOrWhiteSpace($directory)) {
+                throw "Unable to locate the license for $name."
+            }
+            $name
+            (Get-Content -LiteralPath (Join-Path $directory 'LICENSE') -Raw -Encoding UTF8).TrimEnd()
+        }
+    )
+    ($notices -join "`r`n`r`n") | Set-Content -LiteralPath $LiteralPath -Encoding UTF8
+}
+
 # 1. Compile agy.exe
 if (-not (Get-Command "go" -ErrorAction SilentlyContinue)) {
     throw "Go compiler ('go') not found in PATH."
@@ -77,7 +107,7 @@ $buildOut = Join-Path $scriptDir "agy-built.exe"
 if (Test-Path -LiteralPath $buildOut) {
     Remove-Item -LiteralPath $buildOut -Force
 }
-go build -ldflags="-s -w -X main.WrapperVersion=$wrapVersion" -o $buildOut .
+go build -trimpath -ldflags="-s -w -X main.WrapperVersion=$wrapVersion" -o $buildOut .
 if ($LASTEXITCODE -ne 0) {
     Remove-Item -LiteralPath $buildOut -Force -ErrorAction SilentlyContinue
     throw "go build failed with exit code $LASTEXITCODE"
@@ -107,7 +137,22 @@ if ($Standalone) {
     if ($Package) {
         $rootDir = Split-Path -Parent $scriptDir
         $archive = Join-Path $rootDir "agy-enhance-windows-amd64-$wrapVersion.zip"
-        Compress-Archive -LiteralPath @($candidate, (Join-Path $scriptDir "install-windows.ps1"), (Join-Path $rootDir "README.md"), (Join-Path $rootDir "LICENSE")) -DestinationPath $archive -Force
+        $noticeDir = Join-Path ([System.IO.Path]::GetTempPath()) ("agy-notices-" + [guid]::NewGuid().ToString("N"))
+        [System.IO.Directory]::CreateDirectory($noticeDir) | Out-Null
+        try {
+            $noticePath = Join-Path $noticeDir "THIRD-PARTY-NOTICES.txt"
+            Write-ThirdPartyNotices -LiteralPath $noticePath
+            $releaseFiles = @(
+                $candidate
+                (Join-Path $scriptDir "install-windows.ps1")
+                (Join-Path $rootDir "README.md")
+                (Join-Path $rootDir "LICENSE")
+                $noticePath
+            )
+            Compress-Archive -LiteralPath $releaseFiles -DestinationPath $archive -Force
+        } finally {
+            Remove-Item -LiteralPath $noticeDir -Recurse -Force
+        }
         Write-Host "Windows package: $archive" -ForegroundColor Green
     }
     Write-Host "Install with install-windows.ps1." -ForegroundColor Cyan

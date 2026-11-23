@@ -8,6 +8,7 @@ legacy-daemon/README.md
 !wrapper/standalone_test.go
 *.test.*
 !core-engine/prompt-enhancer.test.mjs
+!plugin/hook.test.mjs
 !specs/fail-closed-hook/hook.test.mjs
 *.spec.*
 *smoke*.*
@@ -19,14 +20,38 @@ testdata/
 *.exe
 *.dll
 *.zip
+/agy-enhance-linux-*.tar.gz
+/.agy-enhance-linux-*.tar.gz
+*.pdb
 *.bak
 *.old
+/agy
+/agy-real
+/wrapper/agy
+/wrapper/agy-real
 wrapper/build/
+backup_build_deploy_*/
 
 # Temporary probes, backups, logs, PIDs, and local session captures
 temp/
+/captures/
+/screenshots/
+codex-clipboard-*.png
 *.log
 *.pid
+*.tmp
+*.jsonl
+*.raw
+*.recon
+*.bin
+*.dmp
+*.idb
+*.i64
+*.id0
+*.id1
+*.id2
+*.nam
+*.til
 daemon.out.log
 daemon.err.log
 daemon.log
@@ -35,8 +60,19 @@ e2e-screen-ready.txt
 
 # Local runtime config overrides (keep config.example.json & defaults)
 enhancer-config.json
+/settings.json
+/plugin/settings.json
+/wrapper/settings.json
+settings.local.json
+.gemini/
+.antigravity/
+.antigravity-cli/
 .env
 .env.*
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Dependencies & OS/editor noise
 node_modules/

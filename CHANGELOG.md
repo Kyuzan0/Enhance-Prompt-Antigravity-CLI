@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-11-23
+
+### Added
+
+- Add a portable Ubuntu and Kubuntu launcher archive with its runtime dependencies from this repository.
+
+## [2.6.1] - 2026-11-23
+
+### Changed
+
+- Exclude local CLI configuration, terminal captures, reverse-engineering databases, and Windows build files from Git.
+
+### Fixed
+
+- Keep raw drafts, parser excerpts, and API error bodies out of plugin diagnostics.
+- Remove local build paths from the Windows launcher and include third-party license notices in the Windows ZIP.
+
 ## [2.6.0] - 2026-11-23
 
 ### Added
@@ -94,7 +111,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial Antigravity CLI prompt enhancer plugin and hotkey daemon.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.6.0...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.7.0...HEAD
+[2.7.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.6.1...v2.7.0
+[2.6.1]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.3.4...v2.4.0

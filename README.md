@@ -29,9 +29,19 @@ Toolkit peningkatan prompt independen untuk **Antigravity CLI (`agy`)** yang men
 
 ## Quick Start
 
-### 1. Linux / Kubuntu (`Ctrl+E`)
+### 1. Ubuntu / Kubuntu (`Ctrl+E`)
 
-Jalankan dari clone proyek dengan **Python 3.11+**, **Node.js 18+**, dan CLI native `agy` di `PATH`.
+Siapkan **Python 3.11+**, **Node.js 18+**, dan CLI resmi `agy` di `PATH`. Unduh `agy-enhance-linux-VERSION.tar.gz` dari GitHub Releases, lalu ganti `VERSION` sesuai nama arsip.
+
+```bash
+version=VERSION
+mkdir -p ~/.local/share/agy-prompt-enhancer ~/.local/bin
+tar -xzf "agy-enhance-linux-$version.tar.gz" -C ~/.local/share/agy-prompt-enhancer
+ln -s "$HOME/.local/share/agy-prompt-enhancer/agy-enhance-linux-$version/wrapper/linux/agy-enhance" ~/.local/bin/agy-enhance
+~/.local/bin/agy-enhance
+```
+
+Jika `~/.local/bin/agy-enhance` sudah berupa symlink dari instalasi lama, hapus symlink tersebut sebelum menjalankan `ln -s` lagi. Anda juga dapat menjalankan launcher dari clone.
 
 ```bash
 ./wrapper/linux/agy-enhance
@@ -91,10 +101,10 @@ agy plugin install ./plugin
 
 ### 3. Windows / PowerShell (`Ctrl+E`)
 
-Gunakan **Windows Terminal dengan profil PowerShell**. Installer mendukung Windows PowerShell 5.1 dan PowerShell 7. Paket Windows AMD64 memuat launcher yang sudah dikompilasi. Pastikan CLI resmi bisa dijalankan dengan `agy --version`.
+Gunakan **Windows Terminal dengan profil PowerShell**. Installer mendukung Windows PowerShell 5.1 dan PowerShell 7. Paket Windows AMD64 memuat launcher yang sudah dikompilasi. Pastikan CLI resmi bisa dijalankan dengan `agy --version`, lalu ganti `VERSION` di bawah dengan versi ZIP yang Anda unduh.
 
 ```powershell
-Expand-Archive .\agy-enhance-windows-amd64-2.6.0.zip -DestinationPath .\agy-enhance-windows
+Expand-Archive .\agy-enhance-windows-amd64-VERSION.zip -DestinationPath .\agy-enhance-windows
 powershell -NoProfile -ExecutionPolicy Bypass -File .\agy-enhance-windows\install-windows.ps1
 ```
 
@@ -117,7 +127,7 @@ powershell -ExecutionPolicy Bypass -File .\wrapper\build.ps1 -Standalone
 powershell -ExecutionPolicy Bypass -File .\wrapper\install-windows.ps1
 ```
 
-Untuk membuat paket distribusi dari source, tambahkan `-Package` saat build. Untuk mencopot launcher, jalankan installer dengan `-Uninstall`.
+Untuk membuat paket distribusi dari checkout commit rilis, jalankan `wrapper/build.ps1` dengan `-Standalone -Package`. ZIP berisi launcher, installer, README, lisensi proyek, dan `THIRD-PARTY-NOTICES.txt`. Untuk mencopot launcher, jalankan installer dengan `-Uninstall`.
 
 ## Alur Versioning, Changelog, & Packaging
 
@@ -129,6 +139,9 @@ npm run verify
 
 # 2. Bangun arsip plugin siap distribusi (agy-cli-plugin-<version>.zip)
 npm run package
+
+# Bangun paket launcher untuk Ubuntu dan Kubuntu
+npm run package:linux
 
 # 3. Alur rilis SemVer lengkap (bump versi + update CHANGELOG.md + verify + build zip):
 npm run release:patch
@@ -148,35 +161,32 @@ npm run release:major
 | `PROMPT_ENHANCER_MODEL` | Active session model | Override model eksplisit untuk `plugin/hook.mjs`. |
 | `AGY_AUTO_ENHANCE` | `false` | Aktifkan auto-enhance untuk setiap pesan pada `plugin/hook.mjs`. |
 
+`plugin/config.json` berisi konfigurasi bawaan dan ikut dikemas ke ZIP plugin. Simpan pengaturan pribadi serta kredensial di `enhancer-config.json` lokal atau gunakan `PROMPT_ENHANCER_CONFIG` untuk menunjuk ke berkas di luar repositori.
+
+## Publikasi ke GitHub
+
+Commit kode sumber, konfigurasi bawaan, dan tes. Unggah ZIP plugin, ZIP launcher Windows AMD64, serta tarball launcher Ubuntu/Kubuntu sebagai aset GitHub Release. Simpan salinan CLI resmi, konfigurasi pribadi, tangkapan terminal, transkrip, dan hasil debug di luar commit. Gunakan `temp/` untuk hasil investigasi lokal dan periksa daftar calon commit dengan `git diff --cached --name-only`.
+
 ## Verifikasi
 
 ```powershell
 # Cek versi plugin & wrapper
 node plugin/hook.mjs --version
-agy --wrap-version
+agy-enhance --wrap-version
 
-# Syntax check skrip Node
-node --check plugin/hook.mjs
-node --check specs/fail-closed-hook/hook.mjs
-node --check legacy-daemon/enhance.mjs
-
-# Unit test & verifikasi kontrak
-node specs/fail-closed-hook/hook.test.mjs
-node core-engine/prompt-enhancer.test.mjs
-node verify-contracts.mjs
+# Verifikasi plugin, engine, dan kontrak
+npm run verify
 
 # Dry-run installer plugin
 powershell -ExecutionPolicy Bypass -File plugin/install-plugin.ps1 -WhatIf
 
-# Test & build Go wrapper
+# Tes launcher di Windows
 pushd wrapper
-go test -run 'Test(Enhancer|Composer|EditorBridge|Span|Renderer|Guard|Unicode|Slot|Matrix|Wrapfix)' .
-go build -o "$env:TEMP\agy-verify.exe" .
-Remove-Item "$env:TEMP\agy-verify.exe" -Force -ErrorAction SilentlyContinue
+go test -run '^TestStandalone' .
 popd
 ```
 
-Lihat prosedur acceptance live di [docs/RUNBOOK_CLI_ACCEPTANCE.md](docs/RUNBOOK_CLI_ACCEPTANCE.md).
+Untuk uji manual di Windows Terminal, instal paket, jalankan `agy-enhance`, lalu gunakan `Ctrl+E` pada draft contoh. Ulangi dan tekan shortcut yang sama saat proses masih berjalan untuk memastikan draft asli tetap tersedia setelah pembatalan. Jalankan `npm run test:linux` untuk tes launcher Linux.
 
 ## Uninstall & Rollback
 

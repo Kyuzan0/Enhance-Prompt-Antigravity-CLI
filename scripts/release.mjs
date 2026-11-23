@@ -155,6 +155,7 @@ function main() {
   runNode(['--check', 'scripts/release.mjs']);
   runNode(['--check', 'scripts/auto-bump-on-commit.mjs']);
   runNode(['specs/fail-closed-hook/hook.test.mjs']);
+  runNode(['plugin/hook.test.mjs']);
   runNode(['core-engine/prompt-enhancer.test.mjs']);
 
   rootPkg.version = nextVersion;
