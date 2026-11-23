@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.2] - 2026-11-23
+
+### Changed
+- improve testing, release scripts, and plugin configuration for prompt enhancer
+
+## [2.1.1] - 2026-11-23
+
+### Fixed
+- Include the Node test suites and the plugin README in Git so a clean checkout can verify and build the plugin ZIP.
+- Enable the commit hook on Unix and restore release metadata when verification or packaging fails. Retain previous ZIPs until the replacement is ready.
+
 ## [2.1.0] - 2026-11-22
 
 ### Added
@@ -33,7 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial Antigravity CLI prompt enhancer plugin and hotkey daemon.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.1.2...HEAD
+[2.1.2]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.1.1...v2.1.2
+[2.1.1]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/releases/tag/v1.0.0
