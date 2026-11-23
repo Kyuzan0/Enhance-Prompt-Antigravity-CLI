@@ -664,7 +664,14 @@ export async function invokeUpstreamWithRetry(
 // 8. Main Orchestrator: enhancePrompt
 // ============================================================================
 
-export function buildSystemPrompt(markers: string[]): string {
+export function buildSystemPrompt(
+  markers: string[],
+  { outputLanguage = 'auto' }: { outputLanguage?: 'auto' | 'id' | 'en' } = {},
+): string {
+  const language = outputLanguage === 'id' ? 'Bahasa Indonesia' : outputLanguage === 'en' ? 'English' : null;
+  const languageRule = language
+    ? `Write the rewritten instruction in ${language}. Keep code, file paths, identifiers, literals, and attachment markers verbatim.`
+    : "Maintain the user's original language exactly (Bahasa Indonesia stays Bahasa Indonesia, English stays English). Preserve standard technical terms (such as payload, schema, endpoint, token, middleware, database, test, mock).";
   const markerSection =
     markers.length > 0
       ? `\n   - Attachment Integrity: Preserve active attachment/file markers verbatim in their natural context: ${markers.join(', ')}. Never omit or alter them.`
@@ -675,7 +682,7 @@ export function buildSystemPrompt(markers: string[]): string {
     "",
     "CRITICAL INVARIANTS:",
     "1. REWRITING MANDATE ONLY: Enhance ONLY the prompt instructions. Do NOT implement, solve, answer, execute, or fulfill the task yourself.",
-    `2. STRICT 100% LANGUAGE FIDELITY: Maintain the user's original language exactly (Bahasa Indonesia stays Bahasa Indonesia, English stays English). Preserve standard technical terms (such as payload, schema, endpoint, token, middleware, database, test, mock).${markerSection}`,
+    `2. ${language ? 'OUTPUT LANGUAGE' : 'STRICT 100% LANGUAGE FIDELITY'}: ${languageRule}${markerSection}`,
     "3. GROUNDED TECHNICAL EXPANSION: Expand brief drafts with concrete technical depth across 5 essential dimensions:",
     "   - Data & Payload Schema: Specify exact field names, data types, nullability, boundary constraints, and JSON structures.",
     "   - Input Validation & Edge Cases: Explicitly demand handling for null/undefined, empty strings, malformed data, and boundary values.",

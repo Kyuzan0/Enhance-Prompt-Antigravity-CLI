@@ -18,6 +18,22 @@ const nativeAttachment = /\[(?:Pasted text|Image)\s*#\d+|📄\s*#\d+/i;
 const control = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/u;
 const boundary = /<\/?user_untrusted_draft>/i;
 const utf8 = new TextDecoder('utf-8', { fatal: true });
+const detailRules = {
+  concise: 'Use the fewest words that retain every requirement and constraint. Remove repetition and skip optional headings.',
+  balanced: 'Use proportionate detail and group related requirements when it improves readability.',
+  detailed: 'Make the draft\'s existing goals, constraints, and deliverables explicit. Use headings or bullets for complex drafts while retaining the exact requested scope.',
+};
+
+class RewriteError extends Error {
+  constructor(outcome, message) {
+    super(message);
+    this.outcome = outcome;
+  }
+}
+
+function cancelledError() {
+  return new RewriteError('cancelled', 'Dibatalkan. Draft dipertahankan.');
+}
 
 function report(message) {
   process.stderr.write(`\n[agy-enhance] ${message}\n`);
@@ -30,7 +46,9 @@ function conservativeRewrite(draft) {
 
 async function nativeRewrite(draft, settings, signal, session) {
   const { disarmedText } = sanitizeAndDisarmDraft(draft);
-  const instruction = buildSystemPrompt([]) + `\n\n<user_untrusted_draft>\n${disarmedText}\n</user_untrusted_draft>`;
+  const systemPrompt = buildSystemPrompt([], { outputLanguage: settings.language });
+  const detailRule = Object.hasOwn(detailRules, settings.detail) ? detailRules[settings.detail] : detailRules.balanced;
+  const instruction = `${systemPrompt}\n\nRewrite detail: ${detailRule}\n\n<user_untrusted_draft>\n${disarmedText}\n</user_untrusted_draft>`;
   const args = ['--settings', policy, '-p', instruction, '--output-format', 'text', '--disable-slash-commands'];
   if (settings.model) args.push('--model', settings.model);
 
@@ -44,8 +62,8 @@ async function nativeRewrite(draft, settings, signal, session) {
     });
     return stdout.trim().replace(/^```[^\r\n]*\r?\n([\s\S]+)\r?\n```$/, '$1').trim();
   } catch (error) {
-    if (signal.aborted) throw new Error('Dibatalkan. Draft dipertahankan.');
-    if (error.killed) throw new Error('Model melewati batas waktu. Draft dipertahankan.');
+    if (signal.aborted) throw cancelledError();
+    if (error.killed) throw new RewriteError('timeout', 'Model melewati batas waktu. Draft dipertahankan.');
     throw new Error('Model native gagal. Cek folder trust, autentikasi, atau model di agy-enhance settings.');
   }
 }
@@ -58,7 +76,7 @@ async function readDraft(file) {
   if (control.test(raw)) throw new Error('Draft berisi karakter kontrol. Draft dipertahankan.');
   const draft = raw.replace(/\r\n/g, '\n').trim();
   if (nativeAttachment.test(draft) || (draft.match(/\n/g)?.length ?? 0) >= 4 && draft.length >= 1000) {
-    throw new Error('Draft berisi lampiran atau paste panjang. Draft dipertahankan.');
+    throw new RewriteError('protected', 'Draft berisi lampiran atau paste panjang. Draft dipertahankan.');
   }
   if (Array.from(draft).length > MAX_DRAFT_CHARS) throw new Error('Draft terlalu panjang. Draft dipertahankan.');
   return { bytes, draft, raw, mode: info.mode & 0o777 };
@@ -72,7 +90,7 @@ async function commitDraft(file, original, reply, cancelled) {
   try {
     await fs.writeFile(temporary, content, { flag: 'wx', mode: original.mode });
     if (!(await fs.readFile(file)).equals(original.bytes)) throw new Error('Draft berubah selama rewrite.');
-    if (cancelled()) throw new Error('Dibatalkan. Draft dipertahankan.');
+    if (cancelled()) throw cancelledError();
     await fs.rename(temporary, file);
   } finally {
     await fs.rm(temporary, { force: true });
@@ -93,15 +111,17 @@ async function main(file, session) {
   try {
     const settings = JSON.parse(await fs.readFile(path.join(session, 'settings.json'), 'utf8'));
     const original = await readDraft(file);
-    if (!original.draft || settings.mode === 'off') return;
+    if (!original.draft) return 'empty';
+    if (settings.mode === 'off') return 'unchanged';
     await checkCancel();
-    if (cancelled) return;
-    report('Menulis ulang draft… Ctrl+E atau Ctrl+C untuk membatalkan.');
+    if (cancelled) throw cancelledError();
+    report(`Menulis ulang draft… Tekan ${settings.shortcut ?? 'Ctrl+E'} lagi untuk membatalkan.`);
     const { markers } = sanitizeAndDisarmDraft(original.draft);
     const reply = settings.mode === 'native'
       ? await nativeRewrite(original.draft, settings, controller.signal, session)
       : conservativeRewrite(original.draft);
-    if (reply === original.draft) return;
+    if (cancelled || existsSync(cancelFile)) throw cancelledError();
+    if (reply === original.draft) return 'unchanged';
     if (!reply || control.test(reply) || boundary.test(reply)
         || nativeAttachment.test(reply) || Array.from(reply).length > MAX_DRAFT_CHARS
         || markers.some(marker => !reply.includes(marker))) {
@@ -109,14 +129,21 @@ async function main(file, session) {
     }
     await checkCancel();
     await commitDraft(file, original, reply, () => cancelled || existsSync(cancelFile));
+    return 'applied';
   } finally {
     clearInterval(poll);
   }
 }
 
 // Exit successfully so agy can reopen the untouched draft after any refusal.
+const session = process.env.AGY_ENHANCE_SESSION;
+let outcome;
 try {
-  await main(process.argv[2], process.env.AGY_ENHANCE_SESSION);
+  outcome = await main(process.argv[2], session);
 } catch (error) {
+  outcome = error instanceof RewriteError ? error.outcome : 'failed';
   report(error instanceof Error && !error.code ? error.message : 'Draft gagal diproses dan dipertahankan.');
+}
+if (session) {
+  await fs.writeFile(path.join(session, 'outcome'), outcome, { mode: 0o600 }).catch(() => {});
 }

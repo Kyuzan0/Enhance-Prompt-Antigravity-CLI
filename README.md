@@ -14,6 +14,7 @@ Toolkit peningkatan prompt independen untuk **Antigravity CLI (`agy`)** yang men
 |---|---|---|
 | **CLI Plugin & Skill `/enhance`** | [`plugin/`](plugin/) | Hook `PreInvocation` aditif ([`plugin/hook.mjs`](plugin/hook.mjs)) dengan mode `hybrid`/`llm`/`local`, flag `--version` / `--about`, pembacaan transkrip sesi, dan skill `/enhance` ([`plugin/skills/enhance/SKILL.md`](plugin/skills/enhance/SKILL.md)). |
 | **Go ConPTY CLI Wrapper** | [`wrapper/`](wrapper/) | Wrapper Go (`module ctrle-interceptor`) di atas `agy-real.exe` untuk shortcut terminal `Ctrl+E`, native editor bridge `Ctrl+G`, `--wrap-version`, trigger `!enhance`/`/enhance` sebelum Enter, dan proteksi paste-chip. |
+| **Linux CLI Launcher** | [`wrapper/linux/`](wrapper/linux/) | `Ctrl+E` untuk rewrite draft teks di Kubuntu dengan editor native, pengaturan model, dan mode offline. |
 | **Fail-Closed Hook Spec** | [`specs/fail-closed-hook/`](specs/fail-closed-hook/) | Spesifikasi hook `PreInvocation` *fail-closed* ([`hook.mjs`](specs/fail-closed-hook/hook.mjs)) yang menghentikan turn jika model kanonik tidak valid atau kontrak replace-draft tidak tersedia. |
 | **Core Engine (ESM/TS)** | [`core-engine/`](core-engine/) | Modul engine modular standalone ([`prompt-enhancer.mjs`](core-engine/prompt-enhancer.mjs) / `.ts`) dengan validasi payload, sanitasi anti-injection, dan retry backoff. |
 | **Contracts & Drift Verifier** | [`contracts/`](contracts/) | Kontrak [`model-catalog.json`](contracts/model-catalog.json) & [`strict-deny-policy.json`](contracts/strict-deny-policy.json) beserta [`verify-contracts.mjs`](verify-contracts.mjs). |
@@ -28,7 +29,53 @@ Toolkit peningkatan prompt independen untuk **Antigravity CLI (`agy`)** yang men
 
 ## Quick Start
 
-### 1. Antigravity CLI Plugin (`plugin/`)
+### 1. Linux / Kubuntu (`Ctrl+E`)
+
+Jalankan dari clone proyek dengan **Python 3.11+**, **Node.js 18+**, dan CLI native `agy` di `PATH`.
+
+```bash
+./wrapper/linux/agy-enhance
+```
+
+Ketik draft, tekan **Ctrl+E** atau shortcut yang tampil di samping model, lalu tinjau hasil di composer. Tekan **Enter** untuk mengirim. Selama rewrite berlangsung, tekan shortcut yang sama sekali lagi untuk membatalkan. Draft dengan paste panjang atau lampiran yang terdeteksi dipertahankan apa adanya. **Ctrl+G** tetap membuka editor biasa dari `VISUAL` atau `EDITOR`.
+
+Launcher memakai layar penuh native. Saat rewrite berjalan, draft tetap terlihat dan baris terbawah menampilkan indikator bergerak, waktu berjalan, dan shortcut untuk membatalkan. Input biasa ditahan sampai composer siap agar draft tidak teredit atau terkirim tanpa sengaja. Setelah itu baris terbawah menampilkan hasilnya selama 7 detik, termasuk jika rewrite dibatalkan, gagal, atau melewati timeout.
+
+Opsi `altScreenMode` atau `statusLine` yang diberikan lewat `--settings` didahulukan. Baris progress dan status hasil memerlukan layar penuh.
+
+Untuk membuka launcher dari direktori mana pun, buat symlink di direktori pengguna yang ada di `PATH`.
+
+```bash
+mkdir -p ~/.local/bin
+ln -s "$(pwd)/wrapper/linux/agy-enhance" ~/.local/bin/agy-enhance
+agy-enhance
+```
+
+```bash
+agy-enhance settings menu
+agy-enhance settings
+agy-enhance settings detail detailed
+agy-enhance settings language id
+agy-enhance settings shortcut Alt+K
+agy-enhance settings mode native
+agy-enhance settings mode local
+agy-enhance settings model MODEL_ID
+agy-enhance settings model ""
+agy-enhance settings timeoutSeconds 60
+agy-enhance settings reset
+```
+
+| Pengaturan | Pilihan |
+|---|---|
+| Tingkat detail | `concise`, `balanced` (default), atau `detailed`. Mengatur panjang dan struktur rewrite dengan cakupan tugas yang tetap sama. |
+| Bahasa hasil | `auto` untuk mengikuti draft, `id` untuk Bahasa Indonesia, atau `en` untuk bahasa Inggris. |
+| Shortcut | `Ctrl+E` (default) atau kombinasi `Ctrl`/`Alt` dengan huruf A–Z. `Ctrl+C/G/H/I/J/M` dicadangkan untuk kontrol CLI, editor, atau input terminal. |
+
+Mode `native` menerapkan pilihan detail dan bahasa. Model dipilih dari pengaturan launcher, lalu `--model` jika diberikan, lalu default CLI. Mode `local` merapikan teks sederhana secara offline dalam bahasa draft. Pilih `off` untuk meneruskan sesi ke CLI native.
+
+Pengaturan disimpan di `${XDG_CONFIG_HOME:-~/.config}/agy-prompt-enhancer/settings.json` dan dibaca saat sesi baru dibuka. Gunakan `agy models` untuk melihat ID model dan `npm run test:linux` untuk tes launcher.
+
+### 2. Antigravity CLI Plugin (`plugin/`)
 
 ```powershell
 # Dry-run
@@ -42,7 +89,7 @@ agy plugin validate ./plugin
 agy plugin install ./plugin
 ```
 
-### 2. Go ConPTY CLI Wrapper (`wrapper/`)
+### 3. Go ConPTY CLI Wrapper (`wrapper/`)
 
 ```powershell
 # Build saja (otomatis menyuntikkan versi dari package.json)

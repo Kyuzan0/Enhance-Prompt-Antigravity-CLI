@@ -150,6 +150,7 @@ function main() {
   runNode(['--check', 'plugin/hook.mjs']);
   runNode(['--check', 'specs/fail-closed-hook/hook.mjs']);
   runNode(['--check', 'legacy-daemon/enhance.mjs']);
+  runNode(['--check', 'wrapper/linux/enhance.mjs']);
   runNode(['--check', 'scripts/package-plugin.mjs']);
   runNode(['--check', 'scripts/release.mjs']);
   runNode(['--check', 'scripts/auto-bump-on-commit.mjs']);

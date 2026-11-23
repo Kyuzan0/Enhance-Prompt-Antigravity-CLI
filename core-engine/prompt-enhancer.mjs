@@ -531,7 +531,11 @@ export async function invokeUpstreamWithRetry(requestBody, config, traceId) {
 // 7. Main Orchestrator: enhancePrompt
 // ============================================================================
 
-export function buildSystemPrompt(markers) {
+export function buildSystemPrompt(markers, { outputLanguage = 'auto' } = {}) {
+  const language = outputLanguage === 'id' ? 'Bahasa Indonesia' : outputLanguage === 'en' ? 'English' : null;
+  const languageRule = language
+    ? `Write the rewritten instruction in ${language}. Keep code, file paths, identifiers, literals, and attachment markers verbatim.`
+    : "Maintain the user's original language exactly (Bahasa Indonesia stays Bahasa Indonesia, English stays English). Preserve standard technical terms verbatim.";
   const markerSection =
     markers.length > 0
       ? `\n   - Attachment Integrity: Preserve active attachment/file markers verbatim in their natural context: ${markers.join(', ')}. Never omit or alter them.`
@@ -548,12 +552,12 @@ export function buildSystemPrompt(markers) {
     "   - Do NOT add unrequested duties or sub-tasks (e.g. do NOT mandate changelogs, root-cause explanations, or multi-step obligations unless specifically requested in the user draft).",
     "   - Do NOT enrich adjacent tutorial dimensions or RFC citations unless explicitly asked.",
     "   - If the user asks to explain without changing code, keep the explanation direct and focused on the core concept and its active constraints, retaining the negative constraint (\"tanpa mengubah kode\") without expanding into an exhaustive curriculum.",
-    "   - If semantically uncertain, keep the original wording as-is.",
+    language ? "   - If semantically uncertain, preserve the ambiguity when translating." : "   - If semantically uncertain, keep the original wording as-is.",
     "3. CONTEXTUAL RESOLUTION & CONSTRAINT PRESERVATION:",
     "   - When resolving an entity from session context, you MUST explicitly preserve and incorporate all active, non-superseded limits, constraints, and bounds relevant to that entity based on the active facts and user decisions. Never force superseded constraints.",
     "4. NO FABRICATED FACTS & NO ASSERTED PRIOR CONVERSATION:",
     "   - In fresh sessions or when context is missing/unresolved: MUST NOT assert or imply that prior conversation occurred (do NOT say 'yang dibahas sebelumnya', 'as discussed previously'). Preserve unresolved references as-is without inventing past discussions, function names, files, or extra tasks.",
-    `5. STRICT 100% LANGUAGE FIDELITY: Maintain the user's original language exactly (Bahasa Indonesia stays Bahasa Indonesia, English stays English). Preserve standard technical terms verbatim.${markerSection}`,
+    `5. ${language ? 'OUTPUT LANGUAGE' : 'STRICT 100% LANGUAGE FIDELITY'}: ${languageRule}${markerSection}`,
     "6. INTENT & SCOPE PRESERVATION (TASK TYPE):",
     "   - Preserve the user's exact intent and task type (explain stays explain, review stays review, implement stays implement, fix/debug stays fix). NEVER mutate an explanation or question into an implementation.",
     "   - Preserve all user-provided facts, parameter names, file names, constraints, and negative boundaries with 100% fidelity.",

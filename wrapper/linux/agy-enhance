@@ -18,12 +18,33 @@ import time
 import tty
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULTS = {"mode": "native", "model": "", "timeoutSeconds": 90}
-HOTKEYS = {b"\x05", b"\x1b[101;5u", b"\x1b[101;5:1u", b"\x1b[27;5;101~"}
-CANCEL_KEYS = {b"\x03", b"\x1b[99;5u", b"\x1b[99;5:1u"}
+DEFAULTS = {"mode": "native", "model": "", "timeoutSeconds": 90,
+            "detail": "balanced", "language": "auto", "shortcut": "Ctrl+E"}
+CHOICES = {"mode": ("native", "local", "off"),
+           "detail": ("concise", "balanced", "detailed"),
+           "language": ("auto", "id", "en")}
+SETTING_LABELS = {"detail": "Tingkat detail", "language": "Bahasa hasil", "shortcut": "Shortcut",
+                  "mode": "Mode", "model": "Model", "timeoutSeconds": "Timeout (detik)"}
+SETTINGS_USAGE = "agy-enhance settings [menu | reset | KEY VALUE]"
 ENTER_KEYS = {b"\r", b"\n", b"\x1b[13u", b"\x1b[13;1u", b"\x1b[13;1:1u"}
 PASTE_START, PASTE_END = b"\x1b[200~", b"\x1b[201~"
 CSI = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
+ALTERNATE_PREFIX = b"\x1b[?1049"
+ALTERNATE_ON, ALTERNATE_OFF = ALTERNATE_PREFIX + b"h", ALTERNATE_PREFIX + b"l"
+FULL_REPAINT = b"\x1b[2J"
+RENDER_EVENTS = re.compile(re.escape(ALTERNATE_PREFIX) + rb"[hl]|" + re.escape(FULL_REPAINT))
+HIDE_CURSOR, SHOW_CURSOR = b"\x1b[?25l", b"\x1b[?25h"
+REPAINT_GRACE = 1.0
+OUTCOME_SECONDS = 7
+REWRITE_OUTCOMES = {
+    "applied": "Enhance selesai",
+    "unchanged": "Draft tidak berubah",
+    "empty": "Draft kosong",
+    "cancelled": "Enhance dibatalkan",
+    "timeout": "Enhance melewati batas waktu",
+    "protected": "Lampiran dipertahankan",
+    "failed": "Enhance gagal · Draft dipertahankan",
+}
 NATIVE_ATTACHMENT = re.compile(rb"\[(?:Pasted text|Image)\s*#\d+", re.I)
 DIRECT_FLAGS = {"-p", "--print", "--prompt", "--version", "-v", "--help", "-h", "--bg-updater"}
 SUBCOMMANDS = {"update", "install", "models", "mcp", "plugin", "plugins", "agent", "agents",
@@ -39,16 +60,38 @@ def settings_path():
     return home / "agy-prompt-enhancer" / "settings.json"
 
 
+def normalize_shortcut(shortcut):
+    match = isinstance(shortcut, str) and re.fullmatch(r"(Ctrl|Alt)\+([A-Z])", shortcut.strip(), re.I | re.ASCII)
+    if not match:
+        raise ValueError("Shortcut harus Ctrl+A–Z atau Alt+A–Z, misalnya Ctrl+E.")
+    modifier, letter = match[1].title(), match[2].upper()
+    if modifier == "Ctrl" and letter in "CGHIJM":
+        raise ValueError("Ctrl+C/G/H/I/J/M dicadangkan untuk batal, editor, atau input terminal.")
+    return f"{modifier}+{letter}"
+
+
+def shortcut_sequences(shortcut):
+    modifier, letter = shortcut.split("+")
+    code = ord(letter.lower())
+    control = modifier == "Ctrl"
+    mod = 5 if control else 3
+    legacy = bytes([code - 96]) if control else b"\x1b" + bytes([code])
+    return {legacy, f"\x1b[{code};{mod}u".encode(), f"\x1b[{code};{mod}:1u".encode(),
+            f"\x1b[27;{mod};{code}~".encode()}
+
+
 def validate(settings):
     if (not isinstance(settings, dict) or settings.keys() - DEFAULTS.keys()
             or type(settings.get("timeoutSeconds")) is not int
-            or not 5 <= settings["timeoutSeconds"] <= 180
-            or settings.get("mode") not in ("native", "local", "off")):
-        raise ValueError("Settings: mode must be native, local, or off; timeoutSeconds must be 5–180.")
+            or not 5 <= settings["timeoutSeconds"] <= 180):
+        raise ValueError("Settings: unknown key or timeoutSeconds outside 5–180.")
     model = settings.get("model")
     if not isinstance(model, str) or len(model) > 120 or model.startswith("-") or any(ord(c) < 32 for c in model):
         raise ValueError("Settings: model must be a valid agy model ID.")
-    return settings
+    for key, values in CHOICES.items():
+        if settings.get(key) not in values:
+            raise ValueError(f"Settings: {key} must be one of {', '.join(values)}.")
+    return {**settings, "shortcut": normalize_shortcut(settings.get("shortcut"))}
 
 
 def load_settings(path):
@@ -73,8 +116,51 @@ def save_settings(path, settings):
             temporary.unlink(missing_ok=True)
 
 
+def set_value(settings, key, value):
+    return validate({**settings, key: int(value) if key == "timeoutSeconds" else value.strip()})
+
+
+def settings_menu(path):
+    settings = load_settings(path)
+    fields = tuple(SETTING_LABELS)
+    while True:
+        print("\nPengaturan agy-enhance")
+        for index, key in enumerate(fields, 1):
+            suffix = " (mode native)" if key in ("detail", "language") else ""
+            print(f"  {index}. {SETTING_LABELS[key]}: {settings[key] or 'default agy'}{suffix}")
+        print("  0. Keluar")
+        try:
+            selection = input("Pilih nomor: ").strip()
+            if selection in ("", "0"):
+                return
+            index = int(selection)
+            if not 1 <= index <= len(fields):
+                raise ValueError("Pilih nomor yang tertera.")
+            key = fields[index - 1]
+            choices = " / ".join(CHOICES.get(key, ()))
+            hint = f" ({choices})" if choices else " (kosongkan untuk default agy)" if key == "model" else ""
+            value = input(f"{SETTING_LABELS[key]}{hint}: ").strip()
+            if value or key == "model":
+                updated = set_value(settings, key, value)
+                save_settings(path, updated)
+                settings = updated
+                print("Tersimpan. Berlaku saat sesi baru dibuka.")
+        except ValueError as error:
+            print(error)
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+
+
 def manage_settings(args):
     path = settings_path()
+    if args == ["menu"]:
+        settings_menu(path)
+        return
+    if args == ["--help"]:
+        print(SETTINGS_USAGE)
+        print("Pengaturan:", ", ".join(DEFAULTS))
+        return
     if args == ["reset"]:
         settings = DEFAULTS.copy()
         save_settings(path, settings)
@@ -82,10 +168,9 @@ def manage_settings(args):
         settings = load_settings(path)
         if args:
             if len(args) != 2 or args[0] not in DEFAULTS:
-                raise ValueError("Usage: agy-enhance settings [reset | mode MODE | model ID | timeoutSeconds SECONDS]")
+                raise ValueError(f"Usage: {SETTINGS_USAGE}")
             key, value = args
-            settings[key] = int(value) if key == "timeoutSeconds" else value.strip()
-            validate(settings)
+            settings = set_value(settings, key, value)
             save_settings(path, settings)
     print(path)
     print(json.dumps(settings, indent=2))
@@ -116,6 +201,56 @@ def model_argument(args):
         if arg == "--model" and idx + 1 < len(args):
             return args[idx + 1]
     return ""
+
+
+def session_args(args, directory, command):
+    setting = None
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
+            break
+        if arg.startswith("--settings="):
+            setting = (index, index + 1, arg.partition("=")[2])
+        elif arg == "--settings" and index + 1 < len(args):
+            setting = (index, index + 2, args[index + 1])
+        if arg in VALUE_FLAGS:
+            index += 1
+        index += 1
+
+    config = {}
+    if setting:
+        start, end, value = setting
+        try:
+            config = json.loads(value if value.lstrip().startswith("{") else Path(value).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return args, False
+        if not isinstance(config, dict):
+            return args, False
+    else:
+        start = end = 0
+
+    if "statusLine" in config and "altScreenMode" in config:
+        return args, config["altScreenMode"] == "always"
+    # An editor round-trip re-enters the native alternate screen with a clean redraw.
+    config.setdefault("altScreenMode", "always")
+    config.setdefault("statusLine", {"type": "command", "command": command})
+    session_settings = directory / "cli-settings.json"
+    save_settings(session_settings, config)
+    return [*args[:start], "--settings", str(session_settings), *args[end:]], config["altScreenMode"] == "always"
+
+
+def status_line(directory, state):
+    shortcut = load_settings(directory / "settings.json")["shortcut"]
+    model = state.get("model") if isinstance(state, dict) else None
+    parts = [f"Enhance Prompt = {shortcut}"]
+    if isinstance(model, dict):
+        for value in (model.get("display_name") or model.get("id"), model.get("effort")):
+            if isinstance(value, str):
+                label = "".join(character for character in value if character.isprintable()).strip()
+                if label:
+                    parts.append(label[:120])
+    return "  ·  ".join(parts)
 
 
 def native_binary():
@@ -170,11 +305,118 @@ class InputStream:
         return token
 
 
+class TerminalOutput:
+    def __init__(self):
+        self.pending = b""
+        self.alternate = False
+        self.held = False
+        self.last_request = None
+        self.restore_until = None
+        self.footer_row = None
+        self.last_footer = ""
+
+    def feed(self, data, request, size, now):
+        """Keep the current frame across the enhancer's native editor hand-off."""
+        data = self.pending + data
+        self.pending = b""
+        for length in range(min(len(ALTERNATE_PREFIX), len(data)), 0, -1):
+            if data.endswith(ALTERNATE_PREFIX[:length]) or (
+                length < len(FULL_REPAINT) and data.endswith(FULL_REPAINT[:length])
+            ):
+                data, self.pending = data[:-length], data[-length:]
+                break
+
+        def switch(match):
+            event = match[0]
+            if event == FULL_REPAINT:
+                if not self.held:
+                    self.restore_until = None
+                self.last_footer = ""
+            elif event == ALTERNATE_ON:
+                if self.held:
+                    self.held = False
+                    self.restore_until = now + REPAINT_GRACE
+                    return self.clear_footer(size[0])
+                self.alternate = True
+            elif self.held:
+                return b""
+            elif self.alternate and request is not None and request != self.last_request:
+                self.held = True
+                self.last_request = request
+                self.restore_until = None
+                return HIDE_CURSOR
+            else:
+                self.alternate = False
+                self.held = False
+                self.restore_until = None
+                # The terminal discards the alternate-screen footer with this switch.
+                self.footer_row = None
+                self.last_footer = ""
+            return event
+
+        return RENDER_EVENTS.sub(switch, data)
+
+    def wait_for_composer(self, busy, now):
+        if self.held and not busy and self.restore_until is None:
+            self.restore_until = now + REPAINT_GRACE
+        return (self.held and busy) or (self.restore_until is not None and now < self.restore_until)
+
+    def release_expired_frame(self, busy, rows, now):
+        if busy or self.restore_until is None or now < self.restore_until:
+            return b""
+        self.restore_until = None
+        if not self.held:
+            return b""
+        self.held = False
+        return self.clear_footer(rows) + SHOW_CURSOR
+
+    def clear_footer(self, rows):
+        row, self.footer_row = self.footer_row, None
+        self.last_footer = ""
+        return f"\x1b7\x1b[{row};1H\x1b[2K\x1b8".encode() if row is not None and row <= rows else b""
+
+    def paint_footer(self, size, message):
+        rows, cols = size
+        if self.pending:
+            return b""
+        if not self.alternate or rows < 3 or cols < 2 or not message:
+            return self.clear_footer(rows)
+        message = message[:cols - 1]
+        if self.footer_row == rows and self.last_footer == message:
+            return b""
+        clear = self.clear_footer(rows) if self.footer_row != rows else b""
+        self.footer_row, self.last_footer = rows, message
+        return clear + f"\x1b7\x1b[{rows};1H\x1b[2K{message}\x1b8".encode()
+
+    def paint_progress(self, size, phase, shortcut, started, now):
+        if phase is None or started is None:
+            return self.paint_footer(size, None)
+        _, cols = size
+        elapsed = now - started
+        spinner = "|/-\\"[int(elapsed * 4) % 4]
+        message = f"{spinner} {phase} ({int(elapsed)} dtk)"
+        if phase in ("Menyiapkan enhance", "Sedang enhance prompt"):
+            message += f"  |  {shortcut} untuk batal"
+            if len(message) >= cols:
+                message = f"{spinner} Enhance {int(elapsed)} dtk | {shortcut} batal"
+            if len(message) >= cols:
+                message = f"{spinner} {shortcut} batal"
+        return self.paint_footer(size, message)
+
+    def finish(self):
+        if self.alternate:
+            return ALTERNATE_OFF + SHOW_CURSOR
+        return b""
+
+
 class EditorBridge:
-    def __init__(self, directory):
+    def __init__(self, directory, shortcut=DEFAULTS["shortcut"]):
         self.path = Path(directory)
+        self.hotkeys = shortcut_sequences(shortcut)
         self.input = InputStream()
         self.requested = None
+        self.outcome = None
+        self.outcome_deadline = None
         self.attachment = False
         self.discard_paste = False
         self.paste_bytes = self.paste_lines = 0
@@ -196,17 +438,43 @@ class EditorBridge:
             request.unlink(missing_ok=True)
         return (self.path / "running").exists()
 
-    def forward(self, fd, data):
+    def active_request(self):
+        if self.requested is not None and (time.monotonic() - self.requested < 1.5 or self.busy()):
+            return self.requested
+        return None
+
+    def progress_phase(self, busy, restoring):
+        if busy:
+            if (self.path / "cancel").exists():
+                return "Membatalkan enhance prompt"
+            if (self.path / "running").exists():
+                return "Sedang enhance prompt"
+            return "Menyiapkan enhance"
+        return "Memulihkan composer" if restoring else None
+
+    def final_status(self, now):
+        if self.requested is None:
+            return None
+        if self.outcome_deadline is None:
+            try:
+                result = (self.path / "outcome").read_text(encoding="utf-8").strip()
+            except OSError:
+                return None
+            self.outcome = REWRITE_OUTCOMES.get(result)
+            self.outcome_deadline = now + OUTCOME_SECONDS
+        return self.outcome if now < self.outcome_deadline else None
+
+    def forward(self, fd, data, restoring=False):
         for key, pasted in self.input.feed(data):
             busy = self.busy()
             if key == PASTE_START:
-                self.discard_paste = busy
+                self.discard_paste = busy or restoring
             if pasted and self.discard_paste:
                 if key == PASTE_END:
                     self.discard_paste = False
                 continue
-            if busy:
-                if not pasted and key in HOTKEYS | CANCEL_KEYS:
+            if busy or restoring:
+                if busy and not pasted and key in self.hotkeys:
                     (self.path / "cancel").touch(mode=0o600)
                 continue
             if pasted:
@@ -217,11 +485,14 @@ class EditorBridge:
                 else:
                     self.paste_bytes += len(key)
                     self.paste_lines += key.count(b"\n") + key.count(b"\r")
-            elif key in HOTKEYS:
+            elif key in self.hotkeys:
                 if self.attachment:
                     write_all(1, b"\a")
                     continue
                 (self.path / "cancel").unlink(missing_ok=True)
+                (self.path / "rewrite.log").unlink(missing_ok=True)
+                (self.path / "outcome").unlink(missing_ok=True)
+                self.outcome = self.outcome_deadline = None
                 (self.path / "request").touch(mode=0o600)
                 self.requested = time.monotonic()
                 write_all(fd, b"\x07")
@@ -245,10 +516,13 @@ def editor_main(args):
         os.execvp(command[0], [*command, *args])
     try:
         if len(args) != 1:
-            raise ValueError("Native editor did not supply a single draft file.")
-        with open("/dev/tty", "wb", buffering=0) as terminal:
-            subprocess.run(["node", str(ROOT / "wrapper/linux/enhance.mjs"), args[0]],
-                           stderr=terminal, check=False)
+            (directory / "outcome").write_text("failed", encoding="utf-8")
+            return 0
+        with (directory / "rewrite.log").open("wb") as report:
+            worker = subprocess.run(["node", str(ROOT / "wrapper/linux/enhance.mjs"), args[0]],
+                                    stdout=subprocess.DEVNULL, stderr=report, check=False)
+        if worker.returncode:
+            (directory / "outcome").write_text("failed", encoding="utf-8")
         return 0
     finally:
         running.unlink(missing_ok=True)
@@ -256,30 +530,40 @@ def editor_main(args):
 
 def interactive(binary, args, settings):
     if not shutil.which("node"):
-        raise ValueError("Node.js >=18 must be on PATH to use Ctrl+E.")
+        raise ValueError("Node.js >=18 must be on PATH to use prompt enhancement.")
     old_mode = termios.tcgetattr(0)
     winsize = termios.tcgetwinsize(0)
     original_editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or ""
     with tempfile.TemporaryDirectory(prefix="agy-enhance-") as directory:
-        bridge = EditorBridge(directory)
-        editor = shlex.join([sys.executable, str(Path(__file__).resolve()), "--editor"])
+        bridge = EditorBridge(directory, settings["shortcut"])
+        terminal_output = TerminalOutput()
+        launcher = [sys.executable, str(Path(__file__).resolve())]
+        editor = shlex.join([*launcher, "--editor"])
         settings["model"] = settings["model"] or model_argument(args)
         env = {**os.environ, "EDITOR": editor, "VISUAL": editor, "AGY_ENHANCE_SESSION": directory,
                "AGY_ENHANCE_ORIGINAL_EDITOR": original_editor, "AGY_NATIVE_BIN": binary}
         (bridge.path / "settings.json").write_text(json.dumps(validate(settings)), encoding="utf-8")
         (bridge.path / "disabled-hook.json").write_text('{"enabled":false}', encoding="utf-8")
+        args, reserve_progress_row = session_args(args, bridge.path, shlex.join([*launcher, "--status-line"]))
+
+        def child_size():
+            rows, cols = winsize
+            return (rows - 1 if reserve_progress_row and rows >= 3 else rows, cols)
+
         pid, fd = pty.fork()
         if pid == 0:
             try:
-                termios.tcsetwinsize(0, winsize)
+                termios.tcsetwinsize(0, child_size())
                 os.execve(binary, [binary, *args], env)
             except OSError as error:
                 print(error, file=sys.stderr, flush=True)
                 os._exit(127)
 
         def resize(_number, _frame):
+            nonlocal winsize
             try:
-                termios.tcsetwinsize(fd, termios.tcgetwinsize(0))
+                winsize = termios.tcgetwinsize(0)
+                termios.tcsetwinsize(fd, child_size())
             except OSError:
                 pass
 
@@ -296,11 +580,11 @@ def interactive(binary, args, settings):
                 selector.register(fd, selectors.EVENT_READ)
                 while True:
                     events = selector.select(0.035 if bridge.input.pending else 0.25)
+                    restoring = terminal_output.wait_for_composer(bridge.busy(), time.monotonic())
                     if not events and bridge.input.pending:
                         pending = bridge.input.flush()
-                        if not bridge.busy():
+                        if not restoring and not bridge.busy():
                             write_all(fd, pending)
-                    bridge.busy()
                     for key, _ in events:
                         try:
                             data = os.read(key.fd, 65536)
@@ -315,31 +599,55 @@ def interactive(binary, args, settings):
                             return 0
                         if key.fd == fd:
                             bridge.observe(data)
-                            write_all(1, data)
+                            write_all(1, terminal_output.feed(data, bridge.active_request(), winsize, time.monotonic()))
                         else:
-                            bridge.forward(fd, data)
+                            bridge.forward(fd, data, restoring or terminal_output.wait_for_composer(
+                                bridge.busy(), time.monotonic()))
+                    now = time.monotonic()
+                    busy = bridge.busy()
+                    write_all(1, terminal_output.release_expired_frame(busy, winsize[0], now))
+                    if reserve_progress_row:
+                        phase = bridge.progress_phase(busy, terminal_output.held and
+                                                      terminal_output.wait_for_composer(busy, now))
+                        if not terminal_output.held and terminal_output.restore_until is not None:
+                            phase = None
+                        if phase is not None:
+                            footer = terminal_output.paint_progress(
+                                winsize, phase, settings["shortcut"], bridge.requested, now)
+                        else:
+                            ready = (terminal_output.alternate and not busy and not terminal_output.held
+                                     and terminal_output.restore_until is None and not terminal_output.pending)
+                            footer = terminal_output.paint_footer(winsize, bridge.final_status(now) if ready else None)
+                        write_all(1, footer)
         finally:
             termios.tcsetattr(0, termios.TCSADRAIN, old_mode)
             for number, handler in handlers.items():
                 signal.signal(number, handler)
             os.close(fd)
-            if not finished:
-                try:
-                    os.kill(pid, signal.SIGHUP)
-                except ProcessLookupError:
-                    pass
-                os.waitpid(pid, 0)
+            try:
+                write_all(1, terminal_output.finish())
+            finally:
+                if not finished:
+                    try:
+                        os.kill(pid, signal.SIGHUP)
+                    except ProcessLookupError:
+                        pass
+                    os.waitpid(pid, 0)
 
 
 def main(args):
     if args[:1] == ["--editor"] and os.environ.get("AGY_ENHANCE_SESSION"):
         return editor_main(args[1:])
+    if args == ["--status-line"] and os.environ.get("AGY_ENHANCE_SESSION"):
+        state = json.load(sys.stdin)
+        print(status_line(Path(os.environ["AGY_ENHANCE_SESSION"]), state))
+        return 0
     if args[:1] == ["settings"]:
         manage_settings(args[1:])
         return 0
     if args == ["--enhancer-help"]:
-        print("Usage: agy-enhance [agy arguments]\nCtrl+E rewrites the draft. Ctrl+E or Ctrl+C cancels a running rewrite.\n"
-              "agy-enhance settings [reset | mode native/local/off | model ID | timeoutSeconds SECONDS]")
+        print("Usage: agy-enhance [agy arguments]\nCtrl+E rewrites the draft by default. Press the same shortcut again to cancel.\n"
+              f"{SETTINGS_USAGE}")
         return 0
     binary = native_binary()
     if direct_invocation(args) or not (os.isatty(0) and os.isatty(1)):
