@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-11-23
+
+### Added
+- add Linux CLI launcher and prompt enhancement settings
+
+## [2.3.4] - 2026-11-23
+
+### Fixed
+- Clear Linux enhancement results after seven seconds even when the native CLI is idle.
+
+## [2.3.3] - 2026-11-23
+
+### Fixed
+- Show a live progress row and cancellation hint while the Linux composer is paused. Report the rewrite outcome and keep input gated until the composer redraws.
+
+## [2.3.2] - 2026-11-23
+
+### Fixed
+- Keep the Linux composer visible during prompt enhancement by retaining the native alternate-screen frame through the editor hand-off.
+
+## [2.3.1] - 2026-11-23
+
+### Fixed
+- Keep Linux rewrite diagnostics out of the terminal redraw, use the configured shortcut alone to cancel, and show that shortcut beside the model in the native status line.
+
+## [2.3.0] - 2026-11-23
+
+### Added
+- Add an interactive Linux settings menu and configurable rewrite detail, output language, and keyboard shortcut for the launcher.
+
+## [2.2.0] - 2026-11-23
+
+### Added
+- Add a Linux launcher for Kubuntu with Ctrl+E draft rewriting through the native agy editor, cancellation, and configurable mode, model, and timeout.
+
 ## [2.1.3] - 2026-11-23
 
 ### Changed
@@ -49,7 +84,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial Antigravity CLI prompt enhancer plugin and hotkey daemon.
 
-[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.1.3...HEAD
+[Unreleased]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.3.4...v2.4.0
+[2.3.4]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.3.3...v2.3.4
+[2.3.3]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.3.2...v2.3.3
+[2.3.2]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.3.1...v2.3.2
+[2.3.1]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.3.0...v2.3.1
+[2.3.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.2.0...v2.3.0
+[2.2.0]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.1.3...v2.2.0
 [2.1.3]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.1.2...v2.1.3
 [2.1.2]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.1.1...v2.1.2
 [2.1.1]: https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/compare/v2.1.0...v2.1.1
