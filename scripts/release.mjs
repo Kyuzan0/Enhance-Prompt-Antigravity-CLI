@@ -28,7 +28,7 @@ function bumpSemver(current, target) {
 
 function getRepoBaseUrl(pkg) {
   const raw = pkg.repository && typeof pkg.repository === 'object' ? pkg.repository.url : pkg.repository;
-  return String(raw || 'https://github.com/Kyuzan0/agy-prompt-enhancer').replace(/\.git$/i, '').trim();
+  return String(raw || 'https://github.com/Kyuzan0/Enhance-Prompt-Antigravity-CLI').replace(/\.git$/i, '').trim();
 }
 
 function collectGitCommits(prevVersion) {

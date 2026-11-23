@@ -1,4 +1,4 @@
-# agy CLI — Antigravity CLI Prompt Enhancer
+# Antigravity CLI Prompt Enhancer (agy)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Changelog](https://img.shields.io/badge/Keep%20a%20Changelog-1.1.0-orange.svg)](CHANGELOG.md)
@@ -6,7 +6,7 @@
 
 Toolkit peningkatan prompt independen untuk **Antigravity CLI (`agy`)** yang mencakup plugin `PreInvocation`, Go ConPTY wrapper interaktif, spesifikasi hook *fail-closed*, core engine ESM/TS, dan skrip daemon legacy.
 
-*(Untuk ekstensi **Antigravity IDE**, lihat folder proyek terpisah di `../agy/`.)*
+Untuk editor, lihat proyek [Antigravity IDE Prompt Enhancer](https://github.com/Kyuzan0/Enhance-Prompt-Antigravity).
 
 ## Arsitektur & Komponen
 
@@ -207,6 +207,6 @@ Untuk uji manual di Windows Terminal, instal paket, jalankan `agy-enhance`, lalu
 ## Author, Credits & Changelog
 
 - **Author & Maintainer:** [**Kyuzan0**](https://github.com/Kyuzan0)
-- **Repository:** [Kyuzan0/agy-prompt-enhancer](https://github.com/Kyuzan0/agy-prompt-enhancer)
+- **Repository:** [Kyuzan0/Enhance-Prompt-Antigravity-CLI](https://github.com/Kyuzan0/Enhance-Prompt-Antigravity-CLI)
 - **Riwayat Rilis:** Lihat [CHANGELOG.md](CHANGELOG.md)
 - **Lisensi:** Dilisensikan di bawah [MIT License](LICENSE)
