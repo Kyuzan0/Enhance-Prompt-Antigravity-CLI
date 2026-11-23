@@ -29,6 +29,16 @@ Toolkit peningkatan prompt independen untuk **Antigravity CLI (`agy`)** yang men
 
 ## Quick Start
 
+Pilih paket di GitHub Releases sesuai fitur yang ingin dipakai.
+
+| Paket | Fitur |
+|---|---|
+| `agy-enhance-windows-amd64-VERSION.zip` | Launcher Windows untuk **Ctrl+E** di composer. Jalankan `install-windows.ps1` lewat PowerShell, lalu buka `agy-enhance`. |
+| `agy-enhance-linux-VERSION.tar.gz` | Launcher Ubuntu/Kubuntu untuk **Ctrl+E** di composer. |
+| `agy-cli-plugin-VERSION.zip` | Plugin opsional untuk **`/enhance`** di Antigravity CLI. |
+
+Untuk memakai **Ctrl+E di Windows**, cukup instal launcher Windows AMD64.
+
 ### 1. Ubuntu / Kubuntu (`Ctrl+E`)
 
 Siapkan **Python 3.11+**, **Node.js 18+**, dan CLI resmi `agy` di `PATH`. Unduh `agy-enhance-linux-VERSION.tar.gz` dari GitHub Releases, lalu ganti `VERSION` sesuai nama arsip.
