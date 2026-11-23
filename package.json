@@ -10,11 +10,11 @@
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/Kyuzan0/Enhance-Prompt-Antigravity.git"
+    "url": "https://github.com/Kyuzan0/agy-prompt-enhancer.git"
   },
-  "homepage": "https://github.com/Kyuzan0",
+  "homepage": "https://github.com/Kyuzan0/agy-prompt-enhancer",
   "bugs": {
-    "url": "https://github.com/Kyuzan0/Enhance-Prompt-Antigravity/issues"
+    "url": "https://github.com/Kyuzan0/agy-prompt-enhancer/issues"
   },
   "keywords": [
     "antigravity",

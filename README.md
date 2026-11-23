@@ -207,6 +207,6 @@ Untuk uji manual di Windows Terminal, instal paket, jalankan `agy-enhance`, lalu
 ## Author, Credits & Changelog
 
 - **Author & Maintainer:** [**Kyuzan0**](https://github.com/Kyuzan0)
-- **Repository:** [Kyuzan0/Enhance-Prompt-Antigravity](https://github.com/Kyuzan0/Enhance-Prompt-Antigravity)
+- **Repository:** [Kyuzan0/agy-prompt-enhancer](https://github.com/Kyuzan0/agy-prompt-enhancer)
 - **Riwayat Rilis:** Lihat [CHANGELOG.md](CHANGELOG.md)
 - **Lisensi:** Dilisensikan di bawah [MIT License](LICENSE)

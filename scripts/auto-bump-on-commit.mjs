@@ -148,7 +148,7 @@ function main() {
   }
 
   const repoRaw = rootPkg.repository && typeof rootPkg.repository === 'object' ? rootPkg.repository.url : rootPkg.repository;
-  const repoBase = String(repoRaw || 'https://github.com/Kyuzan0/Enhance-Prompt-Antigravity').replace(/\.git$/i, '').trim();
+  const repoBase = String(repoRaw || 'https://github.com/Kyuzan0/agy-prompt-enhancer').replace(/\.git$/i, '').trim();
 
   rootPkg.version = nextVersion;
   pluginPkg.version = nextVersion;
