@@ -1,12 +1,13 @@
 # Subdirectory documentation & runbooks
 docs/RUNBOOK_*.md
-plugin/README.md
 wrapper/README.md
 legacy-daemon/README.md
 
 # Tests, smoke scripts, test specs, and binary test fixtures
 *_test.go
 *.test.*
+!core-engine/prompt-enhancer.test.mjs
+!specs/fail-closed-hook/hook.test.mjs
 *.spec.*
 *smoke*.*
 *e2e*.*

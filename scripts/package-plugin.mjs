@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Zero-dependency cross-platform plugin ZIP packager for agy-cli.
- * Reads package.json & plugin/plugin.json, removes stale agy-cli-plugin-*.zip
- * archives, and builds agy-cli-plugin-<version>.zip.
+ * Builds agy-cli-plugin-<version>.zip from the manifests and plugin files,
+ * then removes stale plugin archives.
  */
 
 import fs from 'node:fs';
@@ -124,14 +124,8 @@ function main() {
   const outName = `agy-cli-plugin-${version}.zip`;
   const outPath = path.join(rootDir, outName);
 
-  if (!keepOld) {
-    for (const f of fs.readdirSync(rootDir)) {
-      if (f.startsWith('agy-cli-plugin-') && f.endsWith('.zip') && f !== outName) {
-        fs.rmSync(path.join(rootDir, f), { force: true });
-        console.log(`[package-plugin] Removed stale artifact: ${f}`);
-      }
-    }
-  }
+  const staleArchives = keepOld ? [] : fs.readdirSync(rootDir, { withFileTypes: true })
+    .filter(entry => entry.isFile() && /^agy-cli-plugin-.*\.zip$/.test(entry.name) && entry.name !== outName);
 
   const filesToPack = [
     { src: path.join(rootDir, 'plugin', 'plugin.json'), dest: 'prompt-enhancer/plugin.json' },
@@ -160,8 +154,28 @@ function main() {
   }
 
   const zipBuf = buildZipBuffer(entries);
-  fs.writeFileSync(outPath, zipBuf);
   const sha256 = crypto.createHash('sha256').update(zipBuf).digest('hex');
+  const tempPath = path.join(rootDir, `.${outName}.${crypto.randomUUID()}.tmp`);
+  try {
+    fs.writeFileSync(tempPath, zipBuf, { flag: 'wx' });
+    fs.renameSync(tempPath, outPath);
+  } catch (error) {
+    try {
+      fs.rmSync(tempPath, { force: true });
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], 'Plugin archive creation and temporary file cleanup failed');
+    }
+    throw error;
+  }
+
+  for (const { name } of staleArchives) {
+    try {
+      fs.rmSync(path.join(rootDir, name), { force: true });
+      console.log(`[package-plugin] Removed stale artifact: ${name}`);
+    } catch (error) {
+      console.warn(`[package-plugin] Could not remove stale artifact ${name}: ${error.message}`);
+    }
+  }
   console.log(`[package-plugin] Built ${outName} (${zipBuf.length} bytes, ${entries.length} entries)`);
   console.log(`[package-plugin] SHA-256: ${sha256}`);
   for (const e of entries) {

@@ -147,26 +147,49 @@ function main() {
     return;
   }
 
-  rootPkg.version = nextVersion;
-  pluginPkg.version = nextVersion;
-  fs.writeFileSync(rootPkgPath, JSON.stringify(rootPkg, null, 2) + '\n', 'utf8');
-  fs.writeFileSync(pluginPkgPath, JSON.stringify(pluginPkg, null, 2) + '\n', 'utf8');
-  fs.writeFileSync(wrapperVerPath, nextWrapperVer, 'utf8');
-  fs.writeFileSync(changelogPath, nextChangelog, 'utf8');
-  console.log(`[release] Synced package.json, plugin/plugin.json, wrapper/version.go, CHANGELOG.md: ${prevVersion} -> ${nextVersion}`);
-
   runNode(['--check', 'plugin/hook.mjs']);
   runNode(['--check', 'specs/fail-closed-hook/hook.mjs']);
   runNode(['--check', 'legacy-daemon/enhance.mjs']);
   runNode(['--check', 'scripts/package-plugin.mjs']);
   runNode(['--check', 'scripts/release.mjs']);
+  runNode(['--check', 'scripts/auto-bump-on-commit.mjs']);
   runNode(['specs/fail-closed-hook/hook.test.mjs']);
   runNode(['core-engine/prompt-enhancer.test.mjs']);
-  runNode(['verify-contracts.mjs']);
 
-  if (!noBuild) {
-    runNode(['scripts/package-plugin.mjs']);
+  rootPkg.version = nextVersion;
+  pluginPkg.version = nextVersion;
+  const updates = [
+    [rootPkgPath, JSON.stringify(rootPkg, null, 2) + '\n'],
+    [pluginPkgPath, JSON.stringify(pluginPkg, null, 2) + '\n'],
+    [wrapperVerPath, nextWrapperVer],
+    [changelogPath, nextChangelog],
+  ];
+  const originals = updates.map(([file]) => fs.readFileSync(file));
+  let attempted = 0;
+  try {
+    for (const [file, contents] of updates) {
+      attempted++;
+      fs.writeFileSync(file, contents, 'utf8');
+    }
+    runNode(['verify-contracts.mjs']);
+    if (!noBuild) {
+      runNode(['scripts/package-plugin.mjs']);
+    }
+  } catch (error) {
+    const restoreErrors = [];
+    for (let i = attempted - 1; i >= 0; i--) {
+      try {
+        fs.writeFileSync(updates[i][0], originals[i]);
+      } catch (restoreError) {
+        restoreErrors.push(restoreError);
+      }
+    }
+    if (restoreErrors.length) {
+      throw new AggregateError([error, ...restoreErrors], 'Release failed and metadata restoration was incomplete');
+    }
+    throw error;
   }
+  console.log(`[release] Synced package.json, plugin/plugin.json, wrapper/version.go, CHANGELOG.md: ${prevVersion} -> ${nextVersion}`);
 
   if (withTag) {
     const status = execFileSync('git', ['status', '--porcelain'], { cwd: rootDir, encoding: 'utf8' }).trim();
