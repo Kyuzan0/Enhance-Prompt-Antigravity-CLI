@@ -1,0 +1,358 @@
+#!/usr/bin/env python3
+"""Linux terminal launcher and native editor bridge for agy."""
+import errno
+import json
+import os
+from pathlib import Path
+import pty
+import re
+import selectors
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import termios
+import time
+import tty
+
+ROOT = Path(__file__).resolve().parents[2]
+DEFAULTS = {"mode": "native", "model": "", "timeoutSeconds": 90}
+HOTKEYS = {b"\x05", b"\x1b[101;5u", b"\x1b[101;5:1u", b"\x1b[27;5;101~"}
+CANCEL_KEYS = {b"\x03", b"\x1b[99;5u", b"\x1b[99;5:1u"}
+ENTER_KEYS = {b"\r", b"\n", b"\x1b[13u", b"\x1b[13;1u", b"\x1b[13;1:1u"}
+PASTE_START, PASTE_END = b"\x1b[200~", b"\x1b[201~"
+CSI = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
+NATIVE_ATTACHMENT = re.compile(rb"\[(?:Pasted text|Image)\s*#\d+", re.I)
+DIRECT_FLAGS = {"-p", "--print", "--prompt", "--version", "-v", "--help", "-h", "--bg-updater"}
+SUBCOMMANDS = {"update", "install", "models", "mcp", "plugin", "plugins", "agent", "agents",
+               "changelog", "help", "acp", "mic-serve", "remote-control"}
+VALUE_FLAGS = {"--add-dir", "--agent", "--conversation", "--effort", "--input-format",
+               "--json-schema", "--log-file", "--mode", "--model", "--new-project",
+               "--output-format", "--print-timeout", "--project", "--remote-agent", "--settings",
+               "-i", "--prompt-interactive"}
+
+
+def settings_path():
+    home = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return home / "agy-prompt-enhancer" / "settings.json"
+
+
+def validate(settings):
+    if (not isinstance(settings, dict) or settings.keys() - DEFAULTS.keys()
+            or type(settings.get("timeoutSeconds")) is not int
+            or not 5 <= settings["timeoutSeconds"] <= 180
+            or settings.get("mode") not in ("native", "local", "off")):
+        raise ValueError("Settings: mode must be native, local, or off; timeoutSeconds must be 5–180.")
+    model = settings.get("model")
+    if not isinstance(model, str) or len(model) > 120 or model.startswith("-") or any(ord(c) < 32 for c in model):
+        raise ValueError("Settings: model must be a valid agy model ID.")
+    return settings
+
+
+def load_settings(path):
+    if not path.exists():
+        return DEFAULTS.copy()
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("Settings file must contain a JSON object.")
+    return validate({**DEFAULTS, **raw})
+
+
+def save_settings(path, settings):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as out:
+        temporary = Path(out.name)
+        try:
+            json.dump(settings, out, indent=2)
+            out.write("\n")
+            out.close()
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def manage_settings(args):
+    path = settings_path()
+    if args == ["reset"]:
+        settings = DEFAULTS.copy()
+        save_settings(path, settings)
+    else:
+        settings = load_settings(path)
+        if args:
+            if len(args) != 2 or args[0] not in DEFAULTS:
+                raise ValueError("Usage: agy-enhance settings [reset | mode MODE | model ID | timeoutSeconds SECONDS]")
+            key, value = args
+            settings[key] = int(value) if key == "timeoutSeconds" else value.strip()
+            validate(settings)
+            save_settings(path, settings)
+    print(path)
+    print(json.dumps(settings, indent=2))
+
+
+def direct_invocation(args):
+    expecting_value = False
+    for argument in args:
+        if expecting_value:
+            expecting_value = False
+            continue
+        flag = argument.split("=", 1)[0]
+        if flag in DIRECT_FLAGS:
+            return True
+        if argument in VALUE_FLAGS:
+            expecting_value = True
+        elif argument == "--":
+            break
+        elif not argument.startswith("-"):
+            return argument in SUBCOMMANDS
+    return False
+
+
+def model_argument(args):
+    for idx, arg in enumerate(args):
+        if arg.startswith("--model="):
+            return arg.partition("=")[2]
+        if arg == "--model" and idx + 1 < len(args):
+            return args[idx + 1]
+    return ""
+
+
+def native_binary():
+    candidate = shutil.which(os.environ.get("AGY_NATIVE_BIN") or "agy")
+    if not candidate or Path(candidate).resolve() == Path(__file__).resolve():
+        raise ValueError("Native agy not found. Set AGY_NATIVE_BIN to its executable path.")
+    return str(Path(candidate).resolve())
+
+
+def write_all(fd, data):
+    view = memoryview(data)
+    while view:
+        view = view[os.write(fd, view):]
+
+
+def exit_code(status):
+    code = os.waitstatus_to_exitcode(status)
+    return code if code >= 0 else 128 - code
+
+
+class InputStream:
+    def __init__(self):
+        self.pending = b""
+        self.pasting = False
+
+    def feed(self, data):
+        """Yield complete CSI and paste boundaries across read chunks."""
+        self.pending += data
+        while self.pending:
+            if self.pending.startswith(b"\x1b["):
+                match = CSI.match(self.pending)
+                if not match and len(self.pending) < 96:
+                    return
+                width = match.end() if match else 1
+            elif self.pending == b"\x1b":
+                return
+            elif self.pending.startswith(b"\x1b"):
+                width = 2
+            elif self.pending[0] < 32:
+                width = 1
+            else:
+                width = next((i for i, value in enumerate(self.pending) if value < 32), len(self.pending))
+            token, self.pending = self.pending[:width], self.pending[width:]
+            if token == PASTE_START:
+                self.pasting = True
+            yield token, self.pasting
+            if token == PASTE_END:
+                self.pasting = False
+
+    def flush(self):
+        token, self.pending = self.pending, b""
+        return token
+
+
+class EditorBridge:
+    def __init__(self, directory):
+        self.path = Path(directory)
+        self.input = InputStream()
+        self.requested = None
+        self.attachment = False
+        self.discard_paste = False
+        self.paste_bytes = self.paste_lines = 0
+        self.render_tail = b""
+
+    def observe(self, data):
+        rendered = CSI.sub(b"", self.render_tail + data)
+        if NATIVE_ATTACHMENT.search(rendered):
+            self.attachment = True
+        self.render_tail = rendered[-120:]
+
+    def busy(self):
+        if (self.path / "running").exists():
+            return True
+        request = self.path / "request"
+        if request.exists():
+            if self.requested is not None and time.monotonic() - self.requested < 1.5:
+                return True
+            request.unlink(missing_ok=True)
+        return (self.path / "running").exists()
+
+    def forward(self, fd, data):
+        for key, pasted in self.input.feed(data):
+            busy = self.busy()
+            if key == PASTE_START:
+                self.discard_paste = busy
+            if pasted and self.discard_paste:
+                if key == PASTE_END:
+                    self.discard_paste = False
+                continue
+            if busy:
+                if not pasted and key in HOTKEYS | CANCEL_KEYS:
+                    (self.path / "cancel").touch(mode=0o600)
+                continue
+            if pasted:
+                if key == PASTE_START:
+                    self.paste_bytes = self.paste_lines = 0
+                elif key == PASTE_END:
+                    self.attachment |= self.paste_lines >= 4 or self.paste_bytes >= 1000
+                else:
+                    self.paste_bytes += len(key)
+                    self.paste_lines += key.count(b"\n") + key.count(b"\r")
+            elif key in HOTKEYS:
+                if self.attachment:
+                    write_all(1, b"\a")
+                    continue
+                (self.path / "cancel").unlink(missing_ok=True)
+                (self.path / "request").touch(mode=0o600)
+                self.requested = time.monotonic()
+                write_all(fd, b"\x07")
+                continue
+            elif key in ENTER_KEYS:
+                self.attachment = False
+                self.render_tail = b""
+            write_all(fd, key)
+
+
+def editor_main(args):
+    directory = Path(os.environ["AGY_ENHANCE_SESSION"])
+    running = directory / "running"
+    try:
+        (directory / "request").rename(running)
+    except FileNotFoundError:
+        original = os.environ.get("AGY_ENHANCE_ORIGINAL_EDITOR") or "/usr/bin/editor"
+        command = shlex.split(original)
+        if not command or Path(command[0]).resolve() == Path(__file__).resolve():
+            raise ValueError("Set VISUAL or EDITOR to your preferred text editor.")
+        os.execvp(command[0], [*command, *args])
+    try:
+        if len(args) != 1:
+            raise ValueError("Native editor did not supply a single draft file.")
+        with open("/dev/tty", "wb", buffering=0) as terminal:
+            subprocess.run(["node", str(ROOT / "wrapper/linux/enhance.mjs"), args[0]],
+                           stderr=terminal, check=False)
+        return 0
+    finally:
+        running.unlink(missing_ok=True)
+
+
+def interactive(binary, args, settings):
+    if not shutil.which("node"):
+        raise ValueError("Node.js >=18 must be on PATH to use Ctrl+E.")
+    old_mode = termios.tcgetattr(0)
+    winsize = termios.tcgetwinsize(0)
+    original_editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or ""
+    with tempfile.TemporaryDirectory(prefix="agy-enhance-") as directory:
+        bridge = EditorBridge(directory)
+        editor = shlex.join([sys.executable, str(Path(__file__).resolve()), "--editor"])
+        settings["model"] = settings["model"] or model_argument(args)
+        env = {**os.environ, "EDITOR": editor, "VISUAL": editor, "AGY_ENHANCE_SESSION": directory,
+               "AGY_ENHANCE_ORIGINAL_EDITOR": original_editor, "AGY_NATIVE_BIN": binary}
+        (bridge.path / "settings.json").write_text(json.dumps(validate(settings)), encoding="utf-8")
+        (bridge.path / "disabled-hook.json").write_text('{"enabled":false}', encoding="utf-8")
+        pid, fd = pty.fork()
+        if pid == 0:
+            try:
+                termios.tcsetwinsize(0, winsize)
+                os.execve(binary, [binary, *args], env)
+            except OSError as error:
+                print(error, file=sys.stderr, flush=True)
+                os._exit(127)
+
+        def resize(_number, _frame):
+            try:
+                termios.tcsetwinsize(fd, termios.tcgetwinsize(0))
+            except OSError:
+                pass
+
+        def terminate(number, _frame):
+            raise SystemExit(128 + number)
+
+        handlers = {number: signal.signal(number, handler) for number, handler in (
+            (signal.SIGWINCH, resize), (signal.SIGTERM, terminate), (signal.SIGHUP, terminate))}
+        finished = False
+        try:
+            tty.setraw(0)
+            with selectors.DefaultSelector() as selector:
+                selector.register(0, selectors.EVENT_READ)
+                selector.register(fd, selectors.EVENT_READ)
+                while True:
+                    events = selector.select(0.035 if bridge.input.pending else 0.25)
+                    if not events and bridge.input.pending:
+                        pending = bridge.input.flush()
+                        if not bridge.busy():
+                            write_all(fd, pending)
+                    bridge.busy()
+                    for key, _ in events:
+                        try:
+                            data = os.read(key.fd, 65536)
+                        except OSError as error:
+                            if key.fd != fd or error.errno != errno.EIO:
+                                raise
+                            data = b""
+                        if not data:
+                            if key.fd == fd:
+                                finished = True
+                                return exit_code(os.waitpid(pid, 0)[1])
+                            return 0
+                        if key.fd == fd:
+                            bridge.observe(data)
+                            write_all(1, data)
+                        else:
+                            bridge.forward(fd, data)
+        finally:
+            termios.tcsetattr(0, termios.TCSADRAIN, old_mode)
+            for number, handler in handlers.items():
+                signal.signal(number, handler)
+            os.close(fd)
+            if not finished:
+                try:
+                    os.kill(pid, signal.SIGHUP)
+                except ProcessLookupError:
+                    pass
+                os.waitpid(pid, 0)
+
+
+def main(args):
+    if args[:1] == ["--editor"] and os.environ.get("AGY_ENHANCE_SESSION"):
+        return editor_main(args[1:])
+    if args[:1] == ["settings"]:
+        manage_settings(args[1:])
+        return 0
+    if args == ["--enhancer-help"]:
+        print("Usage: agy-enhance [agy arguments]\nCtrl+E rewrites the draft. Ctrl+E or Ctrl+C cancels a running rewrite.\n"
+              "agy-enhance settings [reset | mode native/local/off | model ID | timeoutSeconds SECONDS]")
+        return 0
+    binary = native_binary()
+    if direct_invocation(args) or not (os.isatty(0) and os.isatty(1)):
+        os.execv(binary, [binary, *args])
+    settings = load_settings(settings_path())
+    if settings["mode"] == "off":
+        os.execv(binary, [binary, *args])
+    return interactive(binary, args, settings)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except (OSError, ValueError) as error:
+        print(f"agy-enhance: {error}", file=sys.stderr)
+        sys.exit(1)
